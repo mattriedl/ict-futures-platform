@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<rect width="256" height="256" fill="#0A0E1A"/>
+<path d="M60 80h20v96H60z" fill="#3B82F6"/>
+<rect x="62" y="100" width="16" height="8" fill="#0A0E1A"/>
+<rect x="62" y="140" width="16" height="12" fill="#0A0E1A"/>
+<path d="M110 80h60v20h-20v56h20v20h-60v-20h20v-56h-20z" fill="#3B82F6"/>
+<rect x="130" y="110" width="8" height="16" fill="#0A0E1A"/>
+<rect x="145" y="130" width="8" height="10" fill="#0A0E1A"/>
+<path d="M200 80h20v20h-20v56h20v20h-20z" fill="#3B82F6"/>
+<rect x="202" y="120" width="16" height="14" fill="#0A0E1A"/>
+<rect x="202" y="150" width="16" height="8" fill="#0A0E1A"/>
+<rect x="66" y="95" width="2" height="20" fill="#60A5FA" opacity="0.6"/>
+<rect x="74" y="135" width="2" height="25" fill="#60A5FA" opacity="0.6"/>
+<rect x="134" y="105" width="2" height="30" fill="#60A5FA" opacity="0.6"/>
+<rect x="149" y="125" width="2" height="20" fill="#60A5FA" opacity="0.6"/>
+<rect x="206" y="115" width="2" height="25" fill="#60A5FA" opacity="0.6"/>
+<rect x="214" y="145" width="2" height="18" fill="#60A5FA" opacity="0.6"/>
+</svg>
