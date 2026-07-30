@@ -112,3 +112,24 @@
 .glow-gold {
   box-shadow: 0 0 15px rgba(245,158,11,0.2);
 }
+
+
+
+/* Shared modal input styling for trade/account forms */
+.modal-input {
+  width: 100%;
+  background-color: #0D1121;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  color: #fff;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.modal-input:focus {
+  border-color: rgba(59, 130, 246, 0.5);
+}
+.modal-input::placeholder {
+  color: #5b6478;
+}

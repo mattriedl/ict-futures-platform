@@ -15,12 +15,16 @@ model User {
   emailVerified DateTime?
   image         String?
   password      String?
+  role          String    @default("USER") // "USER" | "ADMIN"
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   accounts      Account[]
   sessions      Session[]
   alerts        Alert[]
   settings      UserSettings?
+  demoAccount   DemoAccount?
+  demoTrades    DemoTrade[]
+  backtests     BacktestRun[]
 }
 
 model Account {
@@ -70,6 +74,7 @@ model Instrument {
   detectedPatterns DetectedPattern[]
   tradeSetups     TradeSetup[]
   alerts          Alert[]
+  demoTrades      DemoTrade[]
 }
 
 model PriceSnapshot {
@@ -187,4 +192,94 @@ model UserSettings {
   alertOnMSS       Boolean @default(true)
   alertOnOTE       Boolean @default(true)
   notificationsOn  Boolean @default(true)
+  emailAlertsEnabled Boolean @default(false)
+  alertEmail       String?
+}
+
+// ---------------------------------------------------------------------------
+// Demo / paper-trading, backtesting, and admin models
+// ---------------------------------------------------------------------------
+
+model DemoAccount {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String   @default("Demo Account")
+  startingBalance Float    @default(100000)
+  currentBalance  Float    @default(100000)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model DemoTrade {
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  instrumentId  String?
+  instrument    Instrument? @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
+  symbol        String
+  direction     String     // "LONG" | "SHORT"
+  source        String     @default("MANUAL") // "ONE_CLICK" | "MANUAL"
+  entryPrice    Float
+  stopLoss      Float
+  takeProfit    Float
+  positionSize  Float      @default(1)
+  riskReward    Float      @default(0)
+  aiScore       Float?
+  confluences   String?    // JSON string
+  timeframe     String     @default("15m")
+  status        String     @default("OPEN") // "OPEN" | "WIN" | "LOSS" | "CLOSED_MANUAL"
+  outcome       String?
+  exitPrice     Float?
+  pnl           Float?
+  pnlPercent    Float?
+  rMultiple     Float?
+  notes         String?
+  tradeSetupId  String?
+  openedAt      DateTime   @default(now())
+  closedAt      DateTime?
+  createdAt     DateTime   @default(now())
+
+  @@index([userId, status])
+  @@index([symbol])
+  @@index([openedAt])
+}
+
+model BacktestRun {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  symbol             String
+  timeframe          String
+  startDate          DateTime
+  endDate            DateTime
+  requiredConfluences String  @default("[]") // JSON array of pattern types
+  minAiScore         Float    @default(0)
+  riskPerTrade       Float    @default(1)
+  config             String?  // JSON of full config
+  totalTrades        Int      @default(0)
+  wins               Int      @default(0)
+  losses             Int      @default(0)
+  winRate            Float    @default(0)
+  avgRR              Float    @default(0)
+  profitFactor       Float    @default(0)
+  netR               Float    @default(0)
+  netPnlPercent      Float    @default(0)
+  maxDrawdownPercent Float    @default(0)
+  equityCurve        String   @default("[]") // JSON array of {t, equity}
+  trades             String   @default("[]") // JSON array of simulated trades
+  createdAt          DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model AppSettings {
+  id                      String   @id @default("global")
+  defaultStartingBalance  Float    @default(100000)
+  registrationOpen        Boolean  @default(true)
+  backtestingEnabled      Boolean  @default(true)
+  oneClickTradingEnabled  Boolean  @default(true)
+  emailAlertsEnabled      Boolean  @default(true)
+  siteName                String   @default("ICT Futures")
+  updatedAt               DateTime @updatedAt
 }

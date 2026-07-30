@@ -8,6 +8,7 @@ import {
   Activity, BarChart2,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import { OneClickTrade } from '@/components/trade/one-click-trade';
 
 const CandlestickChart = dynamic(
   () => import('./candlestick-chart'),
@@ -414,6 +415,25 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
                       {c.replace(/_/g, ' ')}
                     </span>
                   ))}
+                </div>
+              )}
+              {setup?.entryPrice != null && setup?.stopLoss != null && setup?.takeProfit != null && (
+                <div className="mt-3 pt-3 border-t border-white/5">
+                  <OneClickTrade
+                    className="w-full"
+                    setup={{
+                      symbol,
+                      direction: setup.direction,
+                      entryPrice: setup.entryPrice,
+                      stopLoss: setup.stopLoss,
+                      takeProfit: setup.takeProfit,
+                      riskReward: setup.riskReward,
+                      aiScore: setup.aiScore,
+                      confluences: setup.confluences ?? [],
+                      timeframe,
+                    }}
+                  />
+                  <p className="text-[10px] text-gray-600 mt-1.5 text-center">Logs this setup as a tracked demo trade</p>
                 </div>
               )}
             </div>

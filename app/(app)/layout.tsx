@@ -9,9 +9,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     redirect('/login');
   }
 
+  const role = (session.user as any)?.role ?? 'USER';
+
   return (
     <div className="flex h-screen bg-[#0A0E1A] overflow-hidden">
-      <AppSidebar />
+      <AppSidebar role={role} />
       <main className="flex-1 overflow-auto">
         {children}
       </main>

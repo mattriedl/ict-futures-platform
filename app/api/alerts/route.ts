@@ -4,6 +4,42 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { sendAlertEmail, type AlertEmailPayload } from '@/lib/email';
+
+/**
+ * Fire-and-forget email dispatch for a newly created alert.
+ * Respects both the per-user toggle (UserSettings.emailAlertsEnabled) and the
+ * global kill-switch (AppSettings.emailAlertsEnabled). Resolves the destination
+ * address from UserSettings.alertEmail, falling back to the user's login email.
+ * Never throws — any failure is logged by the caller.
+ */
+async function maybeSendAlertEmail(userId: string, alert: any, body: any): Promise<void> {
+  // Global kill-switch (AppSettings is a singleton keyed by id = 'global').
+  const appSettings = await prisma.appSettings.findUnique({ where: { id: 'global' } });
+  if (appSettings && appSettings.emailAlertsEnabled === false) return;
+
+  const settings = await prisma.userSettings.findUnique({ where: { userId } });
+  if (!settings?.emailAlertsEnabled) return;
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const to = settings.alertEmail || user?.email;
+  if (!to) return;
+
+  const symbol = alert?.instrument?.symbol || body?.symbol || 'Futures';
+  const payload: AlertEmailPayload = {
+    symbol,
+    patternType: body?.patternType ?? undefined,
+    direction: body?.direction ?? undefined,
+    aiScore: alert?.aiScore ?? body?.aiScore ?? null,
+    entryPrice: body?.entryPrice ?? null,
+    stopLoss: body?.stopLoss ?? null,
+    takeProfit: body?.takeProfit ?? null,
+    message: alert?.message ?? body?.message ?? undefined,
+    title: alert?.title ?? body?.title ?? undefined,
+  };
+
+  await sendAlertEmail({ to, alert: payload });
+}
 
 export async function GET() {
   try {
@@ -47,7 +83,13 @@ export async function POST(request: NextRequest) {
         aiScore: body?.aiScore ?? null,
         status: 'ACTIVE',
       },
+      include: { instrument: true },
     });
+
+    // Fire-and-forget email notification (never blocks the response).
+    void maybeSendAlertEmail(userId, alert, body).catch((e) =>
+      console.warn('Alert email dispatch failed:', (e as Error).message),
+    );
 
     return NextResponse.json({ alert });
   } catch (error: any) {

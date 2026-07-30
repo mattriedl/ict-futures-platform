@@ -6,7 +6,8 @@ import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import {
   Activity, BarChart3, Brain, Bell, Settings,
-  LogOut, ChevronLeft, ChevronRight, TrendingUp
+  LogOut, ChevronLeft, ChevronRight, TrendingUp,
+  History, FlaskConical, Shield
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -14,13 +15,19 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: Activity },
   { href: '/chart/ES=F', label: 'Chart Analysis', icon: BarChart3 },
   { href: '/insights', label: 'AI Insights', icon: Brain },
+  { href: '/backtest', label: 'Backtesting', icon: FlaskConical },
+  { href: '/journal', label: 'Trade Journal', icon: History },
   { href: '/alerts', label: 'Alerts', icon: Bell },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ role }: { role?: string }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+
+  const items = role === 'ADMIN'
+    ? [...navItems, { href: '/admin', label: 'Admin', icon: Shield }]
+    : navItems;
 
   return (
     <motion.aside
@@ -48,7 +55,7 @@ export function AppSidebar() {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map((item: any) => {
+        {items.map((item: any) => {
           const isActive = pathname?.startsWith(item.href) ||
             (item.href === '/chart/ES=F' && pathname?.startsWith('/chart'));
           const Icon = item.icon;
