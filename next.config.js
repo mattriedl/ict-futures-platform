@@ -6,6 +6,7 @@ const nextConfig = {
   output: process.env.NEXT_OUTPUT_MODE,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
+  allowedDevOrigins: ['*'],
   experimental: {
     outputFileTracingRoot: path.join(__dirname, '../'),
   },
