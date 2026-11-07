@@ -33,10 +33,10 @@ This guide covers moving the application to a new server or standing it up fresh
 ```bash
 # 1. Get the code
 git clone https://github.com/mattriedl/ict-futures-platform.git
-cd ict-futures-platform/nextjs_space   # app lives in nextjs_space/
+cd ict-futures-platform                # the app is at the repo root
 
 # 2. Install dependencies
-yarn install   # or: npm install
+npm ci         # .npmrc sets legacy-peer-deps
 
 # 3. Configure environment
 cp .env.example .env
@@ -85,7 +85,7 @@ The `deploy-portable/` folder contains a complete, secret-free container setup:
 | `.env.example` | All required variables with placeholders. |
 
 ```bash
-cd ict-futures-platform/nextjs_space/deploy-portable
+cd ict-futures-platform/deploy-portable
 cp .env.example .env    # fill in secrets
 docker compose up -d --build
 docker compose logs -f

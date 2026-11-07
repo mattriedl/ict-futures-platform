@@ -1,5 +1,7 @@
 # 06 — API Reference
 
+> ⚠️ **Known gap (Nov 2026):** there is no `middleware.ts`; each route checks auth itself. Routes marked **none ⚠️** currently perform no session check, so they are reachable without logging in — notably `/api/ai/explain`, which can spend LLM credits. Fix before going public.
+
 All endpoints live under `app/api/` (Next.js App Router route handlers). Unless noted, requests/responses are JSON. Most user-facing routes require an authenticated NextAuth session (cookie); admin routes additionally require the Owner/Admin role (`lib/authz.ts`); the autotrade route uses a shared secret instead of a session.
 
 > Base URL in local/prod examples: `http://localhost:3456` (adjust to your deployment).
@@ -22,11 +24,11 @@ All endpoints live under `app/api/` (Next.js App Router route handlers). Unless 
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `GET` | `/api/futures/[symbol]/data` | session | OHLC/candle series for a symbol (chart data). |
-| `GET` | `/api/futures/[symbol]/quote` | session | Real-time/live quote for a symbol (timeframe-independent live price). |
+| `GET` | `/api/futures/[symbol]/data` | **none ⚠️** | OHLC/candle series for a symbol (chart data). |
+| `GET` | `/api/futures/[symbol]/quote` | **none ⚠️** | Real-time/live quote for a symbol (timeframe-independent live price). |
 | `GET/POST` | `/api/futures/[symbol]/analyze` | session | Runs the ICT engine on the symbol; returns detected patterns + confluence score + trade setup. |
-| `GET` | `/api/liquidity` | session | Liquidity analysis data (liquidity pools / resting liquidity features). |
-| `GET` | `/api/insights/setups` | session | Aggregated setup insights / statistics. |
+| `GET` | `/api/liquidity` | **none ⚠️** | Liquidity analysis data (liquidity pools / resting liquidity features). |
+| `GET` | `/api/insights/setups` | **none ⚠️** | Aggregated setup insights / statistics. |
 
 ---
 
@@ -34,9 +36,9 @@ All endpoints live under `app/api/` (Next.js App Router route handlers). Unless 
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/api/ai/explain` | session | Natural-language explanation of a detected setup. |
-| `POST` | `/api/ai/score` | session | AI confluence commentary for a score. |
-| `GET` | `/api/ai/history` | session | Past AI responses for the user/setup. |
+| `POST` | `/api/ai/explain` | **none ⚠️** | Natural-language explanation of a detected setup. |
+| `POST` | `/api/ai/score` | **none ⚠️** | AI confluence commentary for a score. |
+| `GET` | `/api/ai/history` | **none ⚠️** | Past AI responses for the user/setup. |
 
 See `docs/03-ai-llm.md` for provider configuration.
 
