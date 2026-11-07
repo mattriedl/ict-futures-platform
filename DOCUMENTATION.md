@@ -77,7 +77,7 @@ Scheduler (platform task + local systemd timer)
 ## 4. Repository layout
 
 ```
-nextjs_space/
+ict-futures-platform/   (repo root = app root)
 ├── app/
 │   ├── (app)/            authenticated pages: dashboard, chart, backtest,
 │   │                     journal, insights, alerts, settings, admin
@@ -101,7 +101,7 @@ nextjs_space/
 
 ```bash
 git clone https://github.com/mattriedl/ict-futures-platform.git
-cd ict-futures-platform              # then into nextjs_space if nested
+cd ict-futures-platform              # the app is at the repo root
 cp deploy-portable/.env.example .env # fill in real values (see docs/02)
 npm install
 npx prisma migrate deploy            # create schema

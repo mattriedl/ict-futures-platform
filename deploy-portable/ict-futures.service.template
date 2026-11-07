@@ -22,7 +22,7 @@ Wants=network-online.target
 [Service]
 # User that owns the project files.
 User=__RUN_USER__
-# Absolute path to the project root (the nextjs_space directory).
+# Absolute path to the project root (the repository root).
 WorkingDirectory=__PROJECT_DIR__
 # Loads DATABASE_URL, NEXTAUTH_*, LLM_*, etc. from the project .env file.
 EnvironmentFile=__PROJECT_DIR__/.env

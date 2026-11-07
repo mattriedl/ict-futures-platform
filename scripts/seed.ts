@@ -5,25 +5,33 @@ import { INSTRUMENTS } from '../lib/instruments';
 const prisma = new PrismaClient();
 
 async function main() {
-  // Seed test account
-  const hashedPassword = await bcrypt.hash('pqN6Lcv2*g', 10);
-  await prisma.user.upsert({
-    where: { email: 'abacus-9fc3ad79@example.com' },
-    update: {},
-    create: {
-      email: 'abacus-9fc3ad79@example.com',
-      name: 'Admin User',
-      password: hashedPassword,
-      settings: {
-        create: {
-          refreshInterval: 60,
-          theme: 'dark',
-          trackedSymbols: 'ES=F,NQ=F,CL=F,GC=F',
-          alertMinScore: 60,
+  // Optional test account — created ONLY when both env vars are set, so a fresh
+  // server never ships with a login whose password is known from source control.
+  const testEmail = process.env.SEED_TEST_USER_EMAIL;
+  const testPassword = process.env.SEED_TEST_USER_PASSWORD;
+  if (testEmail && testPassword) {
+    const hashedPassword = await bcrypt.hash(testPassword, 10);
+    await prisma.user.upsert({
+      where: { email: testEmail },
+      update: {},
+      create: {
+        email: testEmail,
+        name: 'Test User',
+        password: hashedPassword,
+        settings: {
+          create: {
+            refreshInterval: 60,
+            theme: 'dark',
+            trackedSymbols: 'ES=F,NQ=F,CL=F,GC=F',
+            alertMinScore: 60,
+          },
         },
       },
-    },
-  });
+    });
+    console.log(`Seeded test user ${testEmail}`);
+  } else {
+    console.log('Skipping test user (set SEED_TEST_USER_EMAIL and SEED_TEST_USER_PASSWORD to create one).');
+  }
 
   // Seed all instruments from the single source of truth (lib/instruments.ts):
   // 15 CME/CBOT/NYMEX/COMEX futures + 22 crypto spot (OKX + Kraken) + 28 forex

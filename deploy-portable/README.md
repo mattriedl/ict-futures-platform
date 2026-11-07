@@ -10,7 +10,7 @@ on. Two supported paths:
 Everything the app needs is configured through environment variables — see
 [`.env.example`](./.env.example) for the full, documented list.
 
-> All commands below are run from the **project root** (`nextjs_space/`), i.e.
+> All commands below are run from the **project root** (the repository root), i.e.
 > the directory that contains `package.json`.
 
 ---

@@ -59,7 +59,7 @@ Staggering the local timer (:49) against the platform task (:19) means the cycle
 
 ### Install the local timer
 ```bash
-cd /home/ubuntu/ict_project/nextjs_space/deploy
+cd /path/to/ict-futures-platform/deploy   # edit the paths inside the unit + .sh first
 sudo cp ict-autotrade-local.service ict-autotrade-local.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now ict-autotrade-local.timer

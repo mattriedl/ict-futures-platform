@@ -9,7 +9,7 @@ under `app/(app)/`; the login page is under `app/(auth)/login`.
 
 - **Login / signup:** `app/(auth)/login`, backed by `app/api/auth/*` and `app/api/signup`.
 - **Auth engine:** NextAuth credentials provider (`lib/auth.ts`) with the Prisma adapter; passwords hashed with bcrypt. Sessions are JWT-based.
-- **Roles / authorization:** `lib/authz.ts`. The first/owner account is `mattriedl@hotmail.com` (Owner). Roles gate access to the admin area and admin APIs.
+- **Roles / authorization:** `lib/authz.ts`. Roles are `USER` and `ADMIN`; the owner email (`OWNER_EMAIL` in `lib/auth.ts`) is auto-promoted to `ADMIN`. The role gates access to the admin area and admin APIs.
 - **Registration toggle:** `AppSettings.registrationOpen` (admin) controls whether new signups are allowed.
 
 ---

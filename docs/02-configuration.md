@@ -29,6 +29,7 @@ Never commit a filled-in `.env`.
 | `APP_PORT` | Optional | Host port to serve on. Default `3456`. |
 | `RUN_SEED` | Docker only | `true` seeds instruments on container start. |
 | `NEXT_DIST_DIR` | Yes | Next.js build dir. **Must stay `.build`** — `next.config.js` reads it and the systemd service expects it. |
+| `SEED_TEST_USER_EMAIL` / `SEED_TEST_USER_PASSWORD` | Optional | If both set, `npm run seed` creates a test login. Leave unset in production. |
 | `NEXT_PUBLIC_APPLLM_LIB_URL` | Abacus only | Injects a client script tag on the Abacus platform. Leave blank when self-hosting. |
 
 > **Migration note:** the only values that are host-specific are `DATABASE_URL`,
@@ -53,6 +54,9 @@ Stored one row per user; edited via the Settings UI (`/api/settings`).
 | `emailAlertsEnabled` | `false` | Send alerts by email (needs Gmail env vars). |
 | `alertEmail` | — | Override recipient for email alerts. |
 | `riskPercent` | `1` | % of balance risked per demo trade (drives position sizing). |
+| `maxDailyLossPercent` | `4` | Daily loss limit (% of day-start balance). |
+| `maxOverallDrawdownPercent` | `6` | Overall drawdown limit (% of peak balance). |
+| `enforceDrawdown` | `false` | When true, a breached limit hard-blocks new trades (manual and auto). |
 | `leverageCrypto` | `1` | Leverage for crypto margin (1 = full notional). |
 | `leverageForex` | `30` | Leverage for FX margin. |
 | `leverageFutures` | `10` | Leverage for futures margin. |
@@ -86,7 +90,7 @@ Single global row (`id="global"`), edited via `/api/admin/settings`.
 Tradable instruments live in the `Instrument` model (symbol, name, exchange,
 `tickSize`, `pointValue`, `active`). Seeded by `npm run seed` (futures) plus a
 curated crypto set (`scripts/curate-crypto.ts`, `lib/crypto-instruments.ts`) —
-~37 total (15 futures + ~22 crypto). Manage them in **Admin → Instruments** or
+65 total (15 futures + 22 crypto + 28 forex, defined in `lib/instruments.ts`). Manage them in **Admin → Instruments** or
 by editing the seed scripts. `pointValue` is critical for correct P&L (e.g. ES=F
 = $50/point, MES=F = $5/point); see [docs/08](./08-trading-engine.md).
 
