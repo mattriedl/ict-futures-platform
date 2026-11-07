@@ -81,6 +81,23 @@ export function scoreConfluence(patterns: ICTPattern[]): ConfluenceScore {
   return { score, factors };
 }
 
+// Round a price to a magnitude-appropriate precision. A fixed .toFixed(2)
+// collapses any sub-cent coin (SHIB, PEPE, BONK, etc.) to 0, which makes
+// entry/SL/TP unusable and blocks demo trades. This preserves ~6 significant
+// figures across the full range from BTC ($80k+) down to micro-cap coins.
+function roundPrice(n: number): number {
+  const a = Math.abs(n);
+  if (!isFinite(a) || a === 0) return 0;
+  let decimals: number;
+  if (a >= 1000) decimals = 2;
+  else if (a >= 1) decimals = 4;
+  else if (a >= 0.01) decimals = 5;
+  else if (a >= 0.0001) decimals = 7;
+  else if (a >= 0.000001) decimals = 9;
+  else decimals = 12;
+  return parseFloat(n.toFixed(decimals));
+}
+
 export function generateTradeSetup(bars: OHLCVBar[], patterns: ICTPattern[]): TradeSetupResult | null {
   if (!bars || bars.length === 0 || !patterns || patterns.length === 0) return null;
 
@@ -155,9 +172,9 @@ export function generateTradeSetup(bars: OHLCVBar[], patterns: ICTPattern[]): Tr
 
   return {
     direction: direction as 'BULLISH' | 'BEARISH',
-    entryPrice:  parseFloat(entry.toFixed(2)),
-    stopLoss:    parseFloat(sl.toFixed(2)),
-    takeProfit:  parseFloat(tp.toFixed(2)),
+    entryPrice:  roundPrice(entry),
+    stopLoss:    roundPrice(sl),
+    takeProfit:  roundPrice(tp),
     riskReward:  parseFloat(rr.toFixed(2)),
     aiScore:     confluence.score,
     confluences: uniqueConfluences,

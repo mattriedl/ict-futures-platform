@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   TrendingUp, TrendingDown, Clock, Zap, Target,
-  ArrowUpRight, ArrowDownRight, Activity, BarChart3, Eye
+  ArrowUpRight, ArrowDownRight, Activity, BarChart3, Eye, Shield, ShieldAlert
 } from 'lucide-react';
 import Link from 'next/link';
+import { formatPrice } from '@/lib/format';
 
 const SYMBOLS = [
   { symbol: 'ES=F', name: 'E-mini S&P 500', shortName: 'ES', color: 'blue' },
@@ -33,12 +34,30 @@ interface AnalysisData {
   patternsCount: number;
 }
 
+interface DrawdownStatus {
+  dayStartBalance: number;
+  currentBalance: number;
+  startingBalance: number;
+  todayRealizedPnl: number;
+  todayLossPercent: number;
+  peakBalance?: number;
+  overallDrawdownPercent: number;
+  dailyLimitPercent: number;
+  overallLimitPercent: number;
+  dailyBreached: boolean;
+  overallBreached: boolean;
+  enforceDrawdown: boolean;
+}
+
 export function DashboardClient() {
   const [futuresData, setFuturesData] = useState<Record<string, FuturesData>>({});
   const [analysisData, setAnalysisData] = useState<Record<string, AnalysisData>>({});
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState('');
   const [sessionInfo, setSessionInfo] = useState({ session: '', killZone: '' });
+  // Minimum AI score threshold — reuses the existing user setting (alertMinScore).
+  const [minScore, setMinScore] = useState(60);
+  const [drawdown, setDrawdown] = useState<DrawdownStatus | null>(null);
 
   const fetchData = useCallback(async () => {
     try {
@@ -85,6 +104,34 @@ export function DashboardClient() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  // Load the configured minimum AI score threshold (reuse existing user setting).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/settings');
+        if (!res.ok) return;
+        const json = await res.json();
+        const v = json?.settings?.alertMinScore;
+        if (typeof v === 'number' && !Number.isNaN(v)) setMinScore(v);
+      } catch { /* keep default threshold */ }
+    })();
+  }, []);
+
+  // Poll prop-firm drawdown / daily-loss status for the demo account.
+  useEffect(() => {
+    const loadDrawdown = async () => {
+      try {
+        const res = await fetch('/api/demo/drawdown');
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json?.drawdown) setDrawdown(json.drawdown);
+      } catch { /* ignore drawdown fetch errors */ }
+    };
+    loadDrawdown();
+    const interval = setInterval(loadDrawdown, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -108,6 +155,13 @@ export function DashboardClient() {
     if (!analysis?.setup) return null;
     return { ...(analysis.setup ?? {}), symbol: s.symbol, shortName: s.shortName, bias: analysis?.bias };
   }).filter(Boolean).sort((a: any, b: any) => (b?.aiScore ?? 0) - (a?.aiScore ?? 0));
+
+  // Opportunity screener: every setup that clears the configured minimum AI score,
+  // kept sorted by aiScore descending. Cap the rendered rows so a large qualifying
+  // list stays scrollable instead of overflowing the layout.
+  const MAX_VISIBLE_SETUPS = 25;
+  const qualifyingSetups = allSetups.filter((s: any) => (s?.aiScore ?? 0) >= minScore);
+  const visibleSetups = qualifyingSetups.slice(0, MAX_VISIBLE_SETUPS);
 
   const sessions = [
     { name: 'Asian Session', time: '6 PM - 2 AM ET', kz: false },
@@ -148,6 +202,69 @@ export function DashboardClient() {
         </div>
       </div>
 
+      {/* Prop-firm drawdown / daily-loss guard */}
+      {drawdown && (() => {
+        const dailyRatio = drawdown.dailyLimitPercent > 0 ? drawdown.todayLossPercent / drawdown.dailyLimitPercent : 0;
+        const overallRatio = drawdown.overallLimitPercent > 0 ? drawdown.overallDrawdownPercent / drawdown.overallLimitPercent : 0;
+        const tone = (breached: boolean, ratio: number) =>
+          breached ? 'text-red-400' : ratio >= 0.75 ? 'text-amber-400' : 'text-green-400';
+        const barTone = (breached: boolean, ratio: number) =>
+          breached ? 'bg-red-400' : ratio >= 0.75 ? 'bg-amber-400' : 'bg-green-400';
+        const anyBreach = drawdown.dailyBreached || drawdown.overallBreached;
+        return (
+          <div className={`rounded-xl border p-4 ${
+            anyBreach ? 'bg-red-500/10 border-red-500/30' : 'bg-[#1A1F35]/60 border-white/5'
+          }`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                {anyBreach ? <ShieldAlert className="w-4 h-4 text-red-400" /> : <Shield className="w-4 h-4 text-blue-400" />}
+                <span className="text-sm font-medium text-white">Risk Guard</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                  drawdown.enforceDrawdown ? 'bg-blue-500/10 text-blue-400' : 'bg-gray-500/10 text-gray-400'
+                }`}>
+                  {drawdown.enforceDrawdown ? 'ENFORCED' : 'MONITOR'}
+                </span>
+              </div>
+              <span className="text-xs text-gray-500">
+                Balance <span className="font-mono text-gray-300">${drawdown.currentBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-gray-400">Daily Loss</span>
+                  <span className={`font-mono ${tone(drawdown.dailyBreached, dailyRatio)}`}>
+                    {drawdown.todayLossPercent.toFixed(2)}% / {drawdown.dailyLimitPercent.toFixed(2)}%
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                  <div className={`h-full ${barTone(drawdown.dailyBreached, dailyRatio)}`} style={{ width: `${Math.min(100, dailyRatio * 100)}%` }} />
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1 font-mono">
+                  Today P&amp;L {drawdown.todayRealizedPnl >= 0 ? '+' : ''}${drawdown.todayRealizedPnl.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-gray-400">Overall Drawdown</span>
+                  <span className={`font-mono ${tone(drawdown.overallBreached, overallRatio)}`}>
+                    {drawdown.overallDrawdownPercent.toFixed(2)}% / {drawdown.overallLimitPercent.toFixed(2)}%
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+                  <div className={`h-full ${barTone(drawdown.overallBreached, overallRatio)}`} style={{ width: `${Math.min(100, overallRatio * 100)}%` }} />
+                </div>
+                {anyBreach && (
+                  <p className="text-[10px] text-red-400 mt-1">
+                    {drawdown.enforceDrawdown ? 'New trades are blocked until limits reset.' : 'Limit breached (monitor only).'}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Futures Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         {SYMBOLS.map((s: any, idx: number) => {
@@ -180,22 +297,22 @@ export function DashboardClient() {
                   <div className="flex items-end justify-between">
                     <div>
                       <p className="text-2xl font-mono font-bold text-white">
-                        {loading ? '---' : (data?.currentPrice ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {loading ? '---' : formatPrice(data?.currentPrice ?? 0, { grouping: true })}
                       </p>
                       <div className={`flex items-center gap-1 mt-1 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
                         {isUp ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                         <span className="text-sm font-mono">
-                          {isUp ? '+' : ''}{(data?.change ?? 0).toFixed(2)} ({isUp ? '+' : ''}{(data?.changePct ?? 0).toFixed(2)}%)
+                          {isUp ? '+' : ''}{formatPrice(data?.change ?? 0)} ({isUp ? '+' : ''}{(data?.changePct ?? 0).toFixed(2)}%)
                         </span>
                       </div>
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-gray-500">H / L</p>
                       <p className="text-xs font-mono text-gray-400">
-                        {loading ? '--' : (data?.sessionHigh ?? 0).toFixed(2)}
+                        {loading ? '--' : formatPrice(data?.sessionHigh ?? 0, { grouping: true })}
                       </p>
                       <p className="text-xs font-mono text-gray-400">
-                        {loading ? '--' : (data?.sessionLow ?? 0).toFixed(2)}
+                        {loading ? '--' : formatPrice(data?.sessionLow ?? 0, { grouping: true })}
                       </p>
                     </div>
                   </div>
@@ -229,23 +346,27 @@ export function DashboardClient() {
             <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Zap className="w-5 h-5 text-amber-400" />
-                <h2 className="text-lg font-display font-semibold text-white">Live Opportunities</h2>
+                <h2 className="text-lg font-display font-semibold text-white">Opportunity Screener</h2>
               </div>
-              <span className="text-xs text-gray-500">Ranked by AI confidence</span>
+              <span className="text-xs text-gray-500">
+                {loading
+                  ? 'Scanning…'
+                  : `${qualifyingSetups.length} ${qualifyingSetups.length === 1 ? 'opportunity' : 'opportunities'} clearing your ${minScore} score filter`}
+              </span>
             </div>
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 max-h-[640px] overflow-y-auto">
               {loading ? (
                 Array.from({ length: 3 }).map((_: any, i: number) => (
                   <div key={i} className="h-20 bg-white/5 rounded-lg animate-pulse" />
                 ))
-              ) : allSetups.length === 0 ? (
+              ) : qualifyingSetups.length === 0 ? (
                 <div className="text-center py-8">
                   <Activity className="w-8 h-8 text-gray-600 mx-auto mb-2" />
-                  <p className="text-sm text-gray-500">No active trade setups at this time</p>
-                  <p className="text-xs text-gray-600 mt-1">Setups appear when ICT confluences are detected</p>
+                  <p className="text-sm text-gray-500">No setups currently clear your {minScore} score filter</p>
+                  <p className="text-xs text-gray-600 mt-1">Lower the Minimum AI Score in Settings, or wait for stronger confluences</p>
                 </div>
               ) : (
-                allSetups.slice(0, 5).map((setup: any, idx: number) => (
+                visibleSetups.map((setup: any, idx: number) => (
                   <motion.div
                     key={`${setup?.symbol}-${idx}`}
                     initial={{ opacity: 0, x: -20 }}
@@ -274,9 +395,9 @@ export function DashboardClient() {
                           </div>
                         </div>
                         <div className="grid grid-cols-4 gap-4 text-xs">
-                          <div><span className="text-gray-500">Entry</span><p className="text-white font-mono">{setup?.entryPrice ?? '--'}</p></div>
-                          <div><span className="text-gray-500">Stop Loss</span><p className="text-red-400 font-mono">{setup?.stopLoss ?? '--'}</p></div>
-                          <div><span className="text-gray-500">Take Profit</span><p className="text-green-400 font-mono">{setup?.takeProfit ?? '--'}</p></div>
+                          <div><span className="text-gray-500">Entry</span><p className="text-white font-mono">{setup?.entryPrice != null ? formatPrice(setup.entryPrice, { grouping: true }) : '--'}</p></div>
+                          <div><span className="text-gray-500">Stop Loss</span><p className="text-red-400 font-mono">{setup?.stopLoss != null ? formatPrice(setup.stopLoss, { grouping: true }) : '--'}</p></div>
+                          <div><span className="text-gray-500">Take Profit</span><p className="text-green-400 font-mono">{setup?.takeProfit != null ? formatPrice(setup.takeProfit, { grouping: true }) : '--'}</p></div>
                           <div><span className="text-gray-500">R:R</span><p className="text-blue-400 font-mono">{setup?.riskReward ?? '--'}</p></div>
                         </div>
                         <div className="flex gap-1.5 mt-3 flex-wrap">
@@ -290,6 +411,11 @@ export function DashboardClient() {
                     </Link>
                   </motion.div>
                 ))
+              )}
+              {!loading && qualifyingSetups.length > MAX_VISIBLE_SETUPS && (
+                <p className="text-center text-xs text-gray-600 pt-1">
+                  Showing top {MAX_VISIBLE_SETUPS} of {qualifyingSetups.length} qualifying setups (highest AI score first)
+                </p>
               )}
             </div>
           </div>

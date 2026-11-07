@@ -30,7 +30,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script src="https://apps.abacus.ai/chatllm/appllm-lib.js" />
+        {/* Optional platform helper script (e.g. Abacus appllm-lib). Only injected
+            when NEXT_PUBLIC_APPLLM_LIB_URL is set — omit it on portable/self-hosted
+            deployments so no external provider script is loaded. */}
+        {process.env.NEXT_PUBLIC_APPLLM_LIB_URL ? (
+          <script src={process.env.NEXT_PUBLIC_APPLLM_LIB_URL} />
+        ) : null}
       </head>
       <body className={`${dmSans.variable} ${jakarta.variable} ${jetbrains.variable} font-sans antialiased`}>
         <Providers>

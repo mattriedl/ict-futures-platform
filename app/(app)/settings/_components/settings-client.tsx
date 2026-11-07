@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Bell, Clock, Palette, Save, CheckCircle } from 'lucide-react';
+import { Settings, Bell, Clock, Palette, Save, CheckCircle, Shield, Gauge } from 'lucide-react';
 import { toast } from 'sonner';
 
 export function SettingsClient() {
@@ -199,6 +199,210 @@ export function SettingsClient() {
               </button>
             );
           })}
+        </div>
+      </motion.div>
+
+      {/* Prop-Firm Risk Controls */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="bg-[#1A1F35]/60 border border-white/5 rounded-xl p-5"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <Shield className="w-5 h-5 text-green-400" />
+          <h2 className="text-lg font-display font-semibold text-white">Prop-Firm Risk Controls</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-5">
+          Size positions by risk and cap losses like a funded/prop-firm account. Limits are measured on your demo account.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            {
+              key: 'riskPercent',
+              label: 'Risk per trade (%)',
+              def: 1, min: 0.1, max: 10, step: 0.1,
+              hint: 'Account % risked per auto-sized trade (0.1–10)',
+            },
+            {
+              key: 'maxDailyLossPercent',
+              label: 'Max daily loss (%)',
+              def: 4, min: 1, max: 20, step: 0.5,
+              hint: 'Daily realized-loss cap since UTC midnight (1–20)',
+            },
+            {
+              key: 'maxOverallDrawdownPercent',
+              label: 'Max overall drawdown (%)',
+              def: 6, min: 1, max: 50, step: 0.5,
+              hint: 'Drawdown from your peak balance (1–50)',
+            },
+          ].map((f: any) => (
+            <div key={f.key}>
+              <label className="text-sm text-gray-400 mb-2 block">{f.label}</label>
+              <input
+                type="number"
+                min={f.min}
+                max={f.max}
+                step={f.step}
+                value={settings?.[f.key] ?? f.def}
+                onChange={(e) => {
+                  const raw = parseFloat(e.target.value);
+                  setSettings((prev: any) => ({ ...(prev ?? {}), [f.key]: Number.isNaN(raw) ? f.def : raw }));
+                }}
+                onBlur={(e) => {
+                  let v = parseFloat(e.target.value);
+                  if (Number.isNaN(v)) v = f.def;
+                  v = Math.min(f.max, Math.max(f.min, v));
+                  setSettings((prev: any) => ({ ...(prev ?? {}), [f.key]: v }));
+                }}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-blue-500/50"
+              />
+              <p className="text-[11px] text-gray-600 mt-1">{f.hint}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between mt-5 pt-4 border-t border-white/5">
+          <div>
+            <span className="text-sm text-gray-300">Enforce drawdown limits</span>
+            <p className="text-[11px] text-gray-600 mt-0.5">Block new trades when the daily-loss or overall-drawdown limit is breached.</p>
+          </div>
+          <button
+            onClick={() => setSettings((prev: any) => ({ ...(prev ?? {}), enforceDrawdown: !(prev?.enforceDrawdown ?? false) }))}
+            className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${
+              settings?.enforceDrawdown ? 'bg-green-500' : 'bg-gray-600'
+            }`}
+          >
+            <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+              settings?.enforceDrawdown ? 'translate-x-5' : 'translate-x-0'
+            }`} />
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Leverage */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35 }}
+        className="bg-[#1A1F35]/60 border border-white/5 rounded-xl p-5"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <Gauge className="w-5 h-5 text-amber-400" />
+          <h2 className="text-lg font-display font-semibold text-white">Leverage</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-5">
+          Per-asset-class leverage used to reserve margin when a demo trade opens. Higher leverage reserves less margin
+          per position. Margin is reserved, not deducted — your available balance is your account balance minus the margin
+          held by open trades.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            {
+              key: 'leverageCrypto',
+              label: 'Crypto leverage (x)',
+              def: 1, min: 1, max: 5, step: 1,
+              hint: 'Applied to crypto symbols (1–5)',
+            },
+            {
+              key: 'leverageForex',
+              label: 'Forex leverage (x)',
+              def: 30, min: 1, max: 100, step: 1,
+              hint: 'Applied to FX pairs (1–100)',
+            },
+            {
+              key: 'leverageFutures',
+              label: 'Futures leverage (x)',
+              def: 10, min: 1, max: 50, step: 1,
+              hint: 'Applied to futures contracts (1–50)',
+            },
+          ].map((f: any) => (
+            <div key={f.key}>
+              <label className="text-sm text-gray-400 mb-2 block">{f.label}</label>
+              <input
+                type="number"
+                min={f.min}
+                max={f.max}
+                step={f.step}
+                value={settings?.[f.key] ?? f.def}
+                onChange={(e) => {
+                  const raw = parseFloat(e.target.value);
+                  setSettings((prev: any) => ({ ...(prev ?? {}), [f.key]: Number.isNaN(raw) ? f.def : raw }));
+                }}
+                onBlur={(e) => {
+                  let v = parseFloat(e.target.value);
+                  if (Number.isNaN(v)) v = f.def;
+                  v = Math.min(f.max, Math.max(f.min, v));
+                  setSettings((prev: any) => ({ ...(prev ?? {}), [f.key]: v }));
+                }}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-blue-500/50"
+              />
+              <p className="text-[11px] text-gray-600 mt-1">{f.hint}</p>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Automated Trading */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        className="bg-[#1A1F35]/60 border border-white/5 rounded-xl p-5"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <Gauge className="w-5 h-5 text-emerald-400" />
+          <h2 className="text-lg font-display font-semibold text-white">Automated Trading</h2>
+        </div>
+        <p className="text-xs text-gray-500 mb-5">
+          When enabled, the app periodically scans every instrument and places on-hold (pending) demo trades for setups
+          scoring at or above the threshold below. Trades use your risk-per-trade setting ({settings?.riskPercent ?? 1}%)
+          and your available balance, and activate only when price reaches the suggested entry. No leverage is used on crypto.
+        </p>
+
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="text-sm text-white">Enable automated trading</div>
+            <div className="text-[11px] text-gray-600">Runs on a schedule; places pending orders automatically.</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSettings((prev: any) => ({ ...(prev ?? {}), autoTradeEnabled: !(prev?.autoTradeEnabled ?? false) }))}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              settings?.autoTradeEnabled ? 'bg-emerald-500' : 'bg-gray-600'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                settings?.autoTradeEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="max-w-xs">
+          <label className="text-sm text-gray-400 mb-2 block">Minimum score to auto-trade (0–100)</label>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            value={settings?.autoTradeMinScore ?? 75}
+            onChange={(e) => {
+              const raw = parseFloat(e.target.value);
+              setSettings((prev: any) => ({ ...(prev ?? {}), autoTradeMinScore: Number.isNaN(raw) ? 75 : raw }));
+            }}
+            onBlur={(e) => {
+              let v = parseFloat(e.target.value);
+              if (Number.isNaN(v)) v = 75;
+              v = Math.min(100, Math.max(0, v));
+              setSettings((prev: any) => ({ ...(prev ?? {}), autoTradeMinScore: v }));
+            }}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white font-mono text-sm focus:outline-none focus:border-emerald-500/50"
+          />
+          <p className="text-[11px] text-gray-600 mt-1">Only setups scoring at or above this value are auto-placed (default 75).</p>
         </div>
       </motion.div>
 

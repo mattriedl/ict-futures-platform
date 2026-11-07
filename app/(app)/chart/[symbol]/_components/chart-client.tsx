@@ -5,10 +5,13 @@ import { motion } from 'framer-motion';
 import {
   TrendingUp, TrendingDown, RefreshCw, Clock,
   Layers, Target, Brain, ChevronDown, Zap, Shield, ArrowRight,
-  Activity, BarChart2,
+  Activity, BarChart2, AlertTriangle,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { OneClickTrade } from '@/components/trade/one-click-trade';
+import { CRYPTO_INSTRUMENTS, isCryptoSymbol, isLowLiquiditySymbol } from '@/lib/crypto-instruments';
+import { FOREX_INSTRUMENTS, isForexSymbol } from '@/lib/instruments';
+import { formatPrice as sharedFormatPrice } from '@/lib/format';
 
 const CandlestickChart = dynamic(
   () => import('./candlestick-chart'),
@@ -16,6 +19,19 @@ const CandlestickChart = dynamic(
 );
 
 type SymbolInfo = { symbol: string; name: string; shortName: string; category: string };
+
+// Mirrors the /api/futures/[symbol]/quote response (lib/live-quote.ts LiveQuote).
+type LiveQuote = {
+  symbol: string;
+  price: number | null;
+  baseline: number | null;
+  change: number | null;
+  changePct: number | null;
+  source: string;
+  ts: number | null;
+  stale: boolean;
+  assetClass: 'crypto' | 'forex' | 'futures';
+};
 
 const SYMBOLS: SymbolInfo[] = [
   // Equity Index
@@ -40,6 +56,23 @@ const SYMBOLS: SymbolInfo[] = [
   // Micro
   { symbol: 'MES=F', name: 'Micro E-mini S&P',     shortName: 'MES', category: 'Micro'  },
   { symbol: 'MNQ=F', name: 'Micro E-mini Nasdaq',  shortName: 'MNQ', category: 'Micro'  },
+  // Crypto Spot (live OKX / Kraken feeds)
+  ...CRYPTO_INSTRUMENTS.map((c) => ({
+    symbol: c.symbol,
+    name: c.name,
+    shortName: c.coin,
+    category: 'Crypto Spot',
+  })),
+  // Forex (spot FX via Yahoo Finance)
+  ...FOREX_INSTRUMENTS.map((f) => {
+    const pair = f.symbol.replace('=X', ''); // e.g. EURUSD
+    return {
+      symbol: f.symbol,
+      name: f.name,
+      shortName: `${pair.slice(0, 3)}/${pair.slice(3, 6)}`, // e.g. EUR/USD
+      category: 'Forex',
+    };
+  }),
 ];
 
 const CATEGORIES = [...new Set(SYMBOLS.map(s => s.category))];
@@ -85,7 +118,23 @@ const CATEGORY_COLORS: Record<string, string> = {
   Grains: 'text-green-400',
   Crypto: 'text-orange-400',
   Micro:  'text-cyan-400',
+  'Crypto Spot': 'text-orange-300',
+  Forex:  'text-teal-400',
 };
+
+// Format a price with a sensible number of decimals for its magnitude so both a
+// $60,000 BTC and a $0.00001234 memecoin render legibly. FX pairs keep their
+// standard quoting precision (JPY pairs 3 dp, all others 5 dp) so e.g. EUR/USD
+// shows 1.16932 rather than 1.17; all other markets delegate to the shared
+// adaptive formatter (lib/format) for consistency across the app.
+function formatPrice(p: number | null | undefined, symbol?: string): string {
+  if (p == null || Number.isNaN(p)) return '—';
+  if (symbol && isForexSymbol(symbol)) {
+    const d = /JPY=X$/i.test(symbol) ? 3 : 5;
+    return p.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  return sharedFormatPrice(p, { grouping: true });
+}
 
 export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
   const [symbol, setSymbol]               = useState(decodeURIComponent(initialSymbol));
@@ -102,6 +151,9 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
   const [showSymbolDropdown, setShowSymbolDropdown] = useState(false);
   const [enabledOverlays, setEnabledOverlays]       = useState<Record<string, boolean>>(INITIAL_OVERLAYS);
   const [activeCategory, setActiveCategory]         = useState<string | null>(null);
+  const [quote, setQuote]                           = useState<LiveQuote | null>(null);
+  // Remember the last real price so a transient stale quote doesn't blank the header.
+  const [lastGoodPrice, setLastGoodPrice]           = useState<number | null>(null);
 
   const currentSymbol = SYMBOLS.find(s => s.symbol === symbol) ?? SYMBOLS[0];
 
@@ -137,9 +189,40 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
 
   useEffect(() => {
     fetchAnalysis();
-    const interval = setInterval(fetchAnalysis, 30000);
+    // Crypto trades 24/7, so refresh a bit faster; futures keep the 30s poll.
+    const pollMs = isCryptoSymbol(symbol) ? 12000 : 30000;
+    const interval = setInterval(fetchAnalysis, pollMs);
     return () => clearInterval(interval);
-  }, [fetchAnalysis]);
+  }, [fetchAnalysis, symbol]);
+
+  // Dedicated live-quote poll — real-time and INDEPENDENT of the selected
+  // timeframe, so switching timeframes never moves the header price. Crypto
+  // updates every 5s; futures/FX every 15s.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchQuote = async () => {
+      try {
+        const res = await fetch(`/api/futures/${encodeURIComponent(symbol)}/quote`);
+        if (!res.ok) return;
+        const q: LiveQuote = await res.json();
+        if (cancelled) return;
+        setQuote(q);
+        if (q?.price != null && !q.stale) setLastGoodPrice(q.price);
+      } catch {
+        // Leave the previous quote in place on transient failures.
+      }
+    };
+    // Reset last-good price when the symbol changes, then fetch immediately.
+    setLastGoodPrice(null);
+    setQuote(null);
+    fetchQuote();
+    const quoteMs = isCryptoSymbol(symbol) ? 5000 : 15000;
+    const quoteInterval = setInterval(fetchQuote, quoteMs);
+    return () => {
+      cancelled = true;
+      clearInterval(quoteInterval);
+    };
+  }, [symbol]);
 
   const getAiExplanation = async () => {
     if (aiLoading || patterns.length === 0) return;
@@ -209,6 +292,19 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
     ? SYMBOLS.filter(s => s.category === activeCategory)
     : SYMBOLS;
 
+  // Live price header — driven by the dedicated live-quote poll, NOT the loaded
+  // candles, so the reference price stays real-time and identical across
+  // timeframes. Change/changePct come from the quote's 24h/prev-close baseline.
+  const isLiveQuote  = quote != null && !quote.stale && quote.price != null;
+  const headerPrice  = quote?.price ?? lastGoodPrice;
+  const priceChange  = isLiveQuote ? quote?.change ?? null : null;
+  const priceChangePct = isLiveQuote ? quote?.changePct ?? null : null;
+  const priceUp      = priceChange != null && priceChange >= 0;
+  const quoteUnavailable = quote != null && quote.stale;
+
+  const setAllOverlays = (value: boolean) =>
+    setEnabledOverlays(Object.fromEntries(Object.keys(PATTERN_TYPE_LABELS).map(k => [k, value])));
+
   return (
     <div className="flex flex-col lg:flex-row h-full">
       {/* Main Chart Area */}
@@ -270,6 +366,34 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
               )}
             </div>
 
+            {/* Live Price — real-time, timeframe-independent quote */}
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-mono font-bold text-white tabular-nums">
+                {headerPrice != null ? formatPrice(headerPrice, symbol) : '—'}
+              </span>
+              {priceChange != null && priceChangePct != null && (
+                <span className={`flex items-center gap-1 text-sm font-mono font-semibold ${priceUp ? 'text-green-400' : 'text-red-400'}`}>
+                  {priceUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                  {priceUp ? '+' : ''}{formatPrice(priceChange, symbol)}
+                  <span className="text-xs opacity-90">({priceUp ? '+' : ''}{priceChangePct.toFixed(2)}%)</span>
+                </span>
+              )}
+              {isLiveQuote && (
+                <span className="flex items-center gap-1 text-[10px] font-medium text-green-400 uppercase tracking-wide">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                  </span>
+                  Live
+                </span>
+              )}
+              {quoteUnavailable && (
+                <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wide">
+                  Live price unavailable
+                </span>
+              )}
+            </div>
+
             {/* Timeframe Selector */}
             <div className="flex bg-[#1A1F35] rounded-lg p-0.5 border border-white/5">
               {TIMEFRAMES.map(tf => (
@@ -321,6 +445,18 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
           </div>
         )}
 
+        {/* Low-liquidity / manipulation warning */}
+        {isLowLiquiditySymbol(symbol) && (
+          <div className="flex items-start gap-2 px-5 py-2 text-xs border-b border-amber-500/20 bg-amber-500/10 text-amber-300">
+            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+            <span>
+              <span className="font-semibold">Low-liquidity / high-manipulation market.</span>{' '}
+              This is a memecoin / microcap with thin order books — expect wide spreads, slippage
+              and elevated risk of stop hunts and volatile wicks. Size positions conservatively.
+            </span>
+          </div>
+        )}
+
         {/* Chart */}
         <div className="flex-1 p-4">
           <CandlestickChart bars={bars} patterns={filteredPatterns} loading={loading} />
@@ -330,6 +466,19 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
         <div className="px-5 py-3 border-t border-white/5 bg-[#0D1121]/50">
           <div className="flex items-center gap-2 flex-wrap">
             <Layers className="w-4 h-4 text-gray-400 mr-1 flex-shrink-0" />
+            <button
+              onClick={() => setAllOverlays(true)}
+              className="text-xs px-2.5 py-1 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/20 hover:bg-blue-500/25 transition-all flex-shrink-0"
+            >
+              Select all
+            </button>
+            <button
+              onClick={() => setAllOverlays(false)}
+              className="text-xs px-2.5 py-1 rounded-full bg-white/5 text-gray-400 border border-white/5 hover:text-white hover:bg-white/10 transition-all flex-shrink-0"
+            >
+              Clear all
+            </button>
+            <span className="w-px h-4 bg-white/10 mx-0.5 flex-shrink-0" />
             {Object.entries(PATTERN_TYPE_LABELS).map(([key, label]) => {
               const count = patternsByType[key]?.length ?? 0;
               return (
@@ -397,10 +546,10 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
                 {[
-                  { label: 'Entry',       value: setup?.entryPrice, color: 'text-white'   },
+                  { label: 'Entry',       value: formatPrice(setup?.entryPrice, symbol), color: 'text-white'   },
                   { label: 'R:R Ratio',   value: `1:${setup?.riskReward}`, color: 'text-blue-400' },
-                  { label: 'Stop Loss',   value: setup?.stopLoss,   color: 'text-red-400'  },
-                  { label: 'Take Profit', value: setup?.takeProfit, color: 'text-green-400'},
+                  { label: 'Stop Loss',   value: formatPrice(setup?.stopLoss, symbol),   color: 'text-red-400'  },
+                  { label: 'Take Profit', value: formatPrice(setup?.takeProfit, symbol), color: 'text-green-400'},
                 ].map(({ label, value, color }) => (
                   <div key={label} className="bg-[#0D1121]/60 rounded-lg p-3">
                     <p className="text-xs text-gray-500 mb-1">{label}</p>

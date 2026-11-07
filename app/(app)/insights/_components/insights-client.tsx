@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Brain, Trophy, Target, BarChart3, TrendingUp, Award, Percent } from 'lucide-react';
+import { Brain, Trophy, Target, BarChart3, TrendingUp, Award, Percent, GraduationCap, Layers, Clock } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
   PieChart, Pie, Cell, AreaChart, Area
@@ -20,9 +20,29 @@ const PATTERN_LABELS: Record<string, string> = {
   MITIGATION_BLOCK: 'Mitigation Blocks',
 };
 
+// Human-friendly labels for confluence tags used by the learning store.
+const CONFLUENCE_LABELS: Record<string, string> = {
+  ORDER_BLOCK: 'Order Block',
+  FVG: 'Fair Value Gap',
+  LIQUIDITY_SWEEP: 'Liquidity Sweep',
+  MSS_BOS: 'MSS / BOS',
+  MSS: 'Market Structure Shift',
+  BOS: 'Break of Structure',
+  OTE: 'Optimal Trade Entry',
+  BREAKER_BLOCK: 'Breaker Block',
+  MITIGATION_BLOCK: 'Mitigation Block',
+  SILVER_BULLET: 'Silver Bullet',
+  EQ_HIGHS_LOWS: 'Equal Highs/Lows',
+  PDH_PDL: 'PDH / PDL',
+};
+const confLabel = (k: string) => CONFLUENCE_LABELS[k] ?? (k ?? '').replace(/_/g, ' ');
+const ASSET_LABELS: Record<string, string> = { futures: 'Futures', forex: 'Forex', crypto: 'Crypto' };
+
 export function InsightsClient() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [setupStats, setSetupStats] = useState<any>(null);
+  const [setupLoading, setSetupLoading] = useState(true);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -39,6 +59,23 @@ export function InsightsClient() {
       }
     };
     fetchHistory();
+  }, []);
+
+  useEffect(() => {
+    const fetchSetupStats = async () => {
+      try {
+        const res = await fetch('/api/insights/setups');
+        if (res.ok) {
+          const result = await res.json();
+          setSetupStats(result?.stats ?? null);
+        }
+      } catch (err: any) {
+        console.error('Setup stats fetch error:', err);
+      } finally {
+        setSetupLoading(false);
+      }
+    };
+    fetchSetupStats();
   }, []);
 
   const patternStats = (data?.patternStats ?? []).map((p: any) => ({
@@ -224,6 +261,160 @@ export function InsightsClient() {
                 <Area type="monotone" dataKey="equity" stroke="#10B981" fill="url(#equityGradient)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* Setup Learning */}
+      <div className="bg-[#1A1F35]/60 border border-white/5 rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <GraduationCap className="w-5 h-5 text-emerald-400" />
+          <h2 className="text-lg font-display font-semibold text-white">Setup Learning</h2>
+          <span className="text-xs text-gray-500 ml-auto">Empirical hit-rates from resolved demo trades</span>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          As logged setups resolve to wins or losses, the engine learns which contexts and confluences actually perform.
+        </p>
+
+        {setupLoading ? (
+          <div className="h-40 bg-white/5 animate-pulse rounded-lg" />
+        ) : !setupStats || (setupStats?.totalResolved ?? 0) === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <GraduationCap className="w-8 h-8 text-gray-600 mb-3" />
+            <p className="text-sm text-gray-300 font-medium">Collecting data</p>
+            <p className="text-xs text-gray-500 mt-1 max-w-md">
+              Hit-rate statistics will appear here once logged setups resolve into completed demo trades. Keep analyzing
+              markets and taking demo trades to build history.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {/* Overall summary */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="bg-[#0D1121]/60 rounded-lg p-4 border border-white/5">
+                <div className="flex items-center gap-2 mb-1">
+                  <Award className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs text-gray-500">Resolved Setups</span>
+                </div>
+                <p className="text-xl font-mono font-bold text-white">{setupStats?.totalResolved ?? 0}</p>
+              </div>
+              <div className="bg-[#0D1121]/60 rounded-lg p-4 border border-white/5">
+                <div className="flex items-center gap-2 mb-1">
+                  <Percent className="w-4 h-4 text-green-400" />
+                  <span className="text-xs text-gray-500">Overall Hit Rate</span>
+                </div>
+                <p className="text-xl font-mono font-bold text-white">{setupStats?.overallHitRatePercent ?? 0}%</p>
+              </div>
+              <div className="bg-[#0D1121]/60 rounded-lg p-4 border border-white/5">
+                <div className="flex items-center gap-2 mb-1">
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs text-gray-500">Total Wins</span>
+                </div>
+                <p className="text-xl font-mono font-bold text-white">{setupStats?.totalWins ?? 0}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* By Asset Class */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Layers className="w-4 h-4 text-blue-400" />
+                  <h3 className="text-sm font-semibold text-white">Hit Rate by Asset Class</h3>
+                </div>
+                {(setupStats?.byAssetClass ?? []).length === 0 ? (
+                  <p className="text-xs text-gray-500">No resolved setups yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(setupStats?.byAssetClass ?? []).map((b: any, i: number) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <span className="text-xs text-gray-300 w-16 shrink-0">{ASSET_LABELS[b?.key] ?? b?.key}</span>
+                        <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-emerald-500"
+                            style={{ width: `${Math.min(100, b?.hitRatePercent ?? 0)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-mono text-white w-12 text-right">{b?.hitRatePercent ?? 0}%</span>
+                        <span className="text-[10px] text-gray-500 w-14 text-right">n={b?.total ?? 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* By Timeframe */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Clock className="w-4 h-4 text-purple-400" />
+                  <h3 className="text-sm font-semibold text-white">Hit Rate by Timeframe</h3>
+                </div>
+                {(setupStats?.byTimeframe ?? []).length === 0 ? (
+                  <p className="text-xs text-gray-500">No resolved setups yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(setupStats?.byTimeframe ?? []).map((b: any, i: number) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <span className="text-xs text-gray-300 w-16 shrink-0">{b?.key}</span>
+                        <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-purple-500"
+                            style={{ width: `${Math.min(100, b?.hitRatePercent ?? 0)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-mono text-white w-12 text-right">{b?.hitRatePercent ?? 0}%</span>
+                        <span className="text-[10px] text-gray-500 w-14 text-right">n={b?.total ?? 0}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Confluences */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <TrendingUp className="w-4 h-4 text-green-400" />
+                  <h3 className="text-sm font-semibold text-white">Top Confluences</h3>
+                </div>
+                {(setupStats?.topConfluences ?? []).length === 0 ? (
+                  <p className="text-xs text-gray-500">Not enough resolved setups to rank confluences yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(setupStats?.topConfluences ?? []).map((b: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between bg-[#0D1121]/60 rounded-lg px-3 py-2 border border-white/5">
+                        <span className="text-xs text-gray-200">{confLabel(b?.key)}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-mono font-semibold text-green-400">{b?.hitRatePercent ?? 0}%</span>
+                          <span className="text-[10px] text-gray-500">{b?.wins ?? 0}/{b?.total ?? 0}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Target className="w-4 h-4 text-red-400" />
+                  <h3 className="text-sm font-semibold text-white">Underperforming Confluences</h3>
+                </div>
+                {(setupStats?.bottomConfluences ?? []).length === 0 ? (
+                  <p className="text-xs text-gray-500">Not enough resolved setups to rank confluences yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(setupStats?.bottomConfluences ?? []).map((b: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between bg-[#0D1121]/60 rounded-lg px-3 py-2 border border-white/5">
+                        <span className="text-xs text-gray-200">{confLabel(b?.key)}</span>
+                        <div className="flex items-center gap-3">
+                          <span className={`text-xs font-mono font-semibold ${(b?.hitRatePercent ?? 0) >= 50 ? 'text-amber-400' : 'text-red-400'}`}>{b?.hitRatePercent ?? 0}%</span>
+                          <span className="text-[10px] text-gray-500">{b?.wins ?? 0}/{b?.total ?? 0}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

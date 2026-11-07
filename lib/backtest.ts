@@ -1,5 +1,6 @@
-import { fetchHistoricalData } from '@/lib/yahoo-finance';
+import { fetchMarketHistorical } from '@/lib/market-data';
 import { analyzeICT, scoreConfluence, generateTradeSetup } from '@/lib/ict-engine';
+import { estimateVolumeLiquidity } from '@/lib/liquidity';
 import type { OHLCVBar } from '@/lib/ict-engine/types';
 
 export interface BacktestConfig {
@@ -9,6 +10,7 @@ export interface BacktestConfig {
   requiredConfluences: string[];   // pattern types that MUST be present
   minAiScore: number;              // minimum AI confluence score (0-100)
   riskPerTrade: number;            // risk unit in R (used for equity curve scaling)
+  intendedSizeUsd?: number;        // notional size for the liquidity approximation
 }
 
 export interface SimulatedTrade {
@@ -26,6 +28,9 @@ export interface SimulatedTrade {
   outcome: 'WIN' | 'LOSS' | 'OPEN';
   rMultiple: number;
   pnlPercent: number;
+  // Volume-based liquidity APPROXIMATION (historical depth unavailable).
+  liquidityParticipationPercent: number | null;
+  liquidityRating: 'AMPLE' | 'MODERATE' | 'THIN' | null;
 }
 
 export interface BacktestResult {
@@ -46,6 +51,15 @@ export interface BacktestResult {
   maxDrawdownPercent: number;
   equityCurve: { t: string; equity: number }[];
   trades: SimulatedTrade[];
+  // Volume-based liquidity approximation summary (clearly an estimate).
+  liquidity: {
+    approximate: true;
+    intendedSizeUsd: number;
+    avgParticipationPercent: number | null;
+    thinTradeCount: number;
+    rating: 'AMPLE' | 'MODERATE' | 'THIN' | null;
+    note: string;
+  };
 }
 
 const WARMUP_BARS = 60;       // bars needed before the engine produces signals
@@ -61,8 +75,9 @@ const COOLDOWN_BARS = 3;      // bars to wait after a trade before taking a new 
  */
 export async function runBacktest(config: BacktestConfig): Promise<BacktestResult> {
   const { symbol, timeframe, days, requiredConfluences, minAiScore } = config;
+  const intendedSizeUsd = config.intendedSizeUsd && config.intendedSizeUsd > 0 ? config.intendedSizeUsd : 10000;
 
-  const { bars, synthetic, clampedDays } = await fetchHistoricalData(symbol, timeframe, days);
+  const { bars, synthetic, clampedDays } = await fetchMarketHistorical(symbol, timeframe, days);
 
   const trades: SimulatedTrade[] = [];
   let i = WARMUP_BARS;
@@ -141,21 +156,26 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
       pnlPercent = (move / entry) * 100;
     }
 
+    // Volume-based liquidity approximation for this trade's entry bar window.
+    const liqEst = estimateVolumeLiquidity(bars.slice(0, i + 1), entry, intendedSizeUsd, 20);
+
     trades.push({
       index: i,
       openedAt: new Date(bars[i].timestamp).toISOString(),
       closedAt,
       direction,
-      entryPrice: round2(entry),
-      stopLoss: round2(stop),
-      takeProfit: round2(target),
-      exitPrice: exitPrice != null ? round2(exitPrice) : null,
+      entryPrice: roundPrice(entry),
+      stopLoss: roundPrice(stop),
+      takeProfit: roundPrice(target),
+      exitPrice: exitPrice != null ? roundPrice(exitPrice) : null,
       riskReward: setup.riskReward,
       aiScore: setup.aiScore,
       confluences: setup.confluences,
       outcome,
       rMultiple: round2(rMultiple),
       pnlPercent: round2(pnlPercent),
+      liquidityParticipationPercent: liqEst?.participationPercent ?? null,
+      liquidityRating: liqEst?.rating ?? null,
     });
 
     // Advance past the trade close + cooldown to avoid overlapping duplicates.
@@ -163,7 +183,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
     cooldownUntil = i + COOLDOWN_BARS;
   }
 
-  return summarize(config, bars, trades, synthetic, clampedDays);
+  return summarize(config, bars, trades, synthetic, clampedDays, intendedSizeUsd);
 }
 
 function resolveBar(
@@ -195,6 +215,7 @@ function summarize(
   trades: SimulatedTrade[],
   synthetic: boolean,
   clampedDays: number,
+  intendedSizeUsd: number,
 ): BacktestResult {
   const closed = trades.filter((t) => t.outcome !== 'OPEN');
   const wins = closed.filter((t) => t.outcome === 'WIN');
@@ -226,6 +247,28 @@ function summarize(
   // Express max drawdown as % of peak equity where meaningful, else raw R.
   const maxDrawdownPercent = peak > 0 ? round2((maxDrawdown / peak) * 100) : round2(maxDrawdown);
 
+  // Volume-based liquidity approximation summary across all trades.
+  const parts = trades
+    .map((t) => t.liquidityParticipationPercent)
+    .filter((p): p is number => p != null);
+  const avgParticipationPercent = parts.length > 0 ? round2(parts.reduce((s, p) => s + p, 0) / parts.length) : null;
+  const thinTradeCount = trades.filter((t) => t.liquidityRating === 'THIN').length;
+  const overallRating: 'AMPLE' | 'MODERATE' | 'THIN' | null =
+    avgParticipationPercent == null ? null
+      : avgParticipationPercent <= 1 ? 'AMPLE'
+      : avgParticipationPercent <= 5 ? 'MODERATE'
+      : 'THIN';
+  const liquidity = {
+    approximate: true as const,
+    intendedSizeUsd,
+    avgParticipationPercent,
+    thinTradeCount,
+    rating: overallRating,
+    note:
+      `Liquidity is APPROXIMATED from traded candle volume for an assumed $${intendedSizeUsd.toLocaleString('en-US')} ` +
+      'position. Historical order-book depth is not available, so these figures estimate fill difficulty and are NOT guaranteed fills.',
+  };
+
   return {
     symbol: config.symbol,
     timeframe: config.timeframe,
@@ -244,9 +287,24 @@ function summarize(
     maxDrawdownPercent,
     equityCurve,
     trades,
+    liquidity,
   };
 }
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// Magnitude-aware price rounding so sub-cent coins are not collapsed to 0.
+function roundPrice(n: number): number {
+  const a = Math.abs(n);
+  if (!isFinite(a) || a === 0) return 0;
+  let decimals: number;
+  if (a >= 1000) decimals = 2;
+  else if (a >= 1) decimals = 4;
+  else if (a >= 0.01) decimals = 5;
+  else if (a >= 0.0001) decimals = 7;
+  else if (a >= 0.000001) decimals = 9;
+  else decimals = 12;
+  return parseFloat(n.toFixed(decimals));
 }

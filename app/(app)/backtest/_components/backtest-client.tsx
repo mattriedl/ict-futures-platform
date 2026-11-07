@@ -11,6 +11,7 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import { INSTRUMENTS } from '@/lib/instruments';
+import { isCryptoSymbol } from '@/lib/crypto-instruments';
 
 const TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d'];
 const CONFLUENCE_OPTIONS = [
@@ -26,6 +27,7 @@ export function BacktestClient() {
   const [days, setDays] = useState(60);
   const [minAiScore, setMinAiScore] = useState(0);
   const [riskPerTrade, setRiskPerTrade] = useState(1);
+  const [intendedSizeUsd, setIntendedSizeUsd] = useState(10000);
   const [confluences, setConfluences] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -50,7 +52,7 @@ export function BacktestClient() {
       const res = await fetch('/api/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol, timeframe, days, minAiScore, riskPerTrade, requiredConfluences: confluences }),
+        body: JSON.stringify({ symbol, timeframe, days, minAiScore, riskPerTrade, intendedSizeUsd, requiredConfluences: confluences }),
       });
       const json = await res.json();
       if (!res.ok) { toast.error(json.error || 'Backtest failed'); return; }
@@ -158,6 +160,22 @@ export function BacktestClient() {
                 className="w-full bg-[#0D1121] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white font-mono focus:border-blue-500/50 outline-none" />
             </div>
 
+            {/* Position size (USD) — used for the crypto liquidity estimate */}
+            <div>
+              <label className="text-xs text-gray-400 mb-1.5 block">
+                Position size (USD)
+                <span className="text-gray-600 ml-1">· liquidity estimate (crypto)</span>
+              </label>
+              <input type="number" min={100} max={100000000} step={100} value={intendedSizeUsd}
+                onChange={(e) => setIntendedSizeUsd(+e.target.value)}
+                className="w-full bg-[#0D1121] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white font-mono focus:border-blue-500/50 outline-none" />
+              {isCryptoSymbol(symbol) && (
+                <p className="text-[10px] text-gray-600 mt-1">
+                  Used to estimate how your order size compares with historical candle volume.
+                </p>
+              )}
+            </div>
+
             {/* Required confluences */}
             <div>
               <label className="text-xs text-gray-400 mb-1.5 block">Required confluences (optional)</label>
@@ -231,6 +249,46 @@ export function BacktestClient() {
                 <StatCard label="Net R" value={`${result.netR >= 0 ? '+' : ''}${fmt(result.netR, 2)}R`} accent={result.netR >= 0 ? 'green' : 'red'} icon={Target} />
                 <StatCard label="Window" value={`${result.clampedDays ?? days}d`} accent="blue" icon={Calendar} sub={result.timeframe} />
               </div>
+
+              {/* Liquidity estimate (crypto, volume-based approximation) */}
+              {result.liquidity && isCryptoSymbol(result.symbol) && (
+                <div className="bg-[#1A1F35]/60 backdrop-blur border border-amber-500/15 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-display font-semibold text-white flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-amber-400" /> Liquidity Estimate
+                    </h3>
+                    <span className="text-[10px] uppercase tracking-wider text-amber-400/80 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                      Approximation
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+                    <div className="bg-[#0D1121]/60 rounded-lg p-3">
+                      <p className="text-[10px] text-gray-500 mb-1">Order size</p>
+                      <p className="font-mono font-semibold text-white">${fmt(result.liquidity.intendedSizeUsd, 0)}</p>
+                    </div>
+                    <div className="bg-[#0D1121]/60 rounded-lg p-3">
+                      <p className="text-[10px] text-gray-500 mb-1">Avg volume participation</p>
+                      <p className="font-mono font-semibold text-white">
+                        {result.liquidity.avgParticipationPercent == null ? '—' : `${fmt(result.liquidity.avgParticipationPercent, 2)}%`}
+                      </p>
+                    </div>
+                    <div className="bg-[#0D1121]/60 rounded-lg p-3">
+                      <p className="text-[10px] text-gray-500 mb-1">Rating</p>
+                      <p className={`font-mono font-semibold ${
+                        result.liquidity.rating === 'AMPLE' ? 'text-green-400'
+                          : result.liquidity.rating === 'MODERATE' ? 'text-amber-400'
+                          : result.liquidity.rating === 'THIN' ? 'text-red-400' : 'text-gray-500'
+                      }`}>{result.liquidity.rating ?? '—'}</p>
+                    </div>
+                  </div>
+                  {result.liquidity.thinTradeCount > 0 && (
+                    <p className="text-xs text-amber-300/90 mb-2">
+                      {result.liquidity.thinTradeCount} trade{result.liquidity.thinTradeCount === 1 ? '' : 's'} would have consumed a large share of candle volume (thin liquidity).
+                    </p>
+                  )}
+                  <p className="text-[11px] text-gray-500 leading-relaxed">{result.liquidity.note}</p>
+                </div>
+              )}
 
               {/* Equity curve */}
               <div className="bg-[#1A1F35]/60 backdrop-blur border border-white/5 rounded-xl p-5">

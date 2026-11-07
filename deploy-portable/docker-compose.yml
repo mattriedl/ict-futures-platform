@@ -1,0 +1,55 @@
+# ICT Futures Trading Platform — portable Docker Compose stack (app + PostgreSQL 16).
+#
+# Run from the project root (nextjs_space/):
+#   cp deploy-portable/.env.example .env      # then edit .env
+#   docker compose -f deploy-portable/docker-compose.yml up -d --build
+#
+# The build context is "." (the project root) so the Dockerfile can COPY the source.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ict}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ict_password}
+      POSTGRES_DB: ${POSTGRES_DB:-ict_futures}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ict} -d ${POSTGRES_DB:-ict_futures}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy-portable/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Point the app at the bundled Postgres service. Override in .env if you
+      # use an external managed database (set DATABASE_URL there instead).
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-ict}:${POSTGRES_PASSWORD:-ict_password}@db:5432/${POSTGRES_DB:-ict_futures}?schema=public}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3456}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      # AI explanations (OpenAI-compatible endpoint). Leave blank to disable the feature.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o}
+      # Email (optional — password reset / notifications)
+      GMAIL_USER: ${GMAIL_USER:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      # Run instrument seeding on first boot
+      RUN_SEED: ${RUN_SEED:-true}
+      PORT: "3456"
+      NEXT_DIST_DIR: .build
+      NODE_ENV: production
+    ports:
+      - "${APP_PORT:-3456}:3456"
+
+volumes:
+  db_data:

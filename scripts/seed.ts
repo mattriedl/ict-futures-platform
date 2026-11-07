@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { INSTRUMENTS } from '../lib/instruments';
 
 const prisma = new PrismaClient();
 
@@ -24,21 +25,24 @@ async function main() {
     },
   });
 
-  // Seed instruments
-  const instruments = [
-    { symbol: 'ES=F', name: 'E-mini S&P 500', exchange: 'CME', tickSize: 0.25, pointValue: 50 },
-    { symbol: 'NQ=F', name: 'E-mini Nasdaq 100', exchange: 'CME', tickSize: 0.25, pointValue: 20 },
-    { symbol: 'CL=F', name: 'Crude Oil WTI', exchange: 'NYMEX', tickSize: 0.01, pointValue: 1000 },
-    { symbol: 'GC=F', name: 'Gold', exchange: 'COMEX', tickSize: 0.10, pointValue: 100 },
-  ];
-
-  for (const inst of instruments) {
+  // Seed all instruments from the single source of truth (lib/instruments.ts):
+  // 15 CME/CBOT/NYMEX/COMEX futures + 22 crypto spot (OKX + Kraken) + 28 forex
+  // (Yahoo FX "=X") = 65 total. Crypto names are already suffixed "(Crypto)".
+  for (const inst of INSTRUMENTS) {
+    const data = {
+      symbol: inst.symbol,
+      name: inst.name,
+      exchange: inst.exchange,
+      tickSize: inst.tickSize,
+      pointValue: inst.pointValue,
+    };
     await prisma.instrument.upsert({
       where: { symbol: inst.symbol },
-      update: { name: inst.name, exchange: inst.exchange, tickSize: inst.tickSize, pointValue: inst.pointValue },
-      create: inst,
+      update: { name: data.name, exchange: data.exchange, tickSize: data.tickSize, pointValue: data.pointValue },
+      create: data,
     });
   }
+  console.log(`Seeded ${INSTRUMENTS.length} instruments (futures + crypto spot).`);
 
   // Seed historical pattern outcomes for AI learning
   const patternTypes = ['ORDER_BLOCK', 'FVG', 'LIQUIDITY_SWEEP', 'MSS_BOS', 'OTE', 'BREAKER_BLOCK', 'MITIGATION_BLOCK'];

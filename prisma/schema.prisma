@@ -1,6 +1,6 @@
 generator client {
     provider = "prisma-client-js"
-    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -194,6 +194,18 @@ model UserSettings {
   notificationsOn  Boolean @default(true)
   emailAlertsEnabled Boolean @default(false)
   alertEmail       String?
+  // Risk-based position sizing & prop-firm drawdown guard
+  riskPercent                Float   @default(1) // % of balance risked per trade
+  maxDailyLossPercent        Float   @default(4) // daily loss limit (% of day-start balance)
+  maxOverallDrawdownPercent  Float   @default(6) // overall drawdown limit (% of peak)
+  enforceDrawdown            Boolean @default(false) // hard-block new trades when a limit is breached
+  // Per-asset-class leverage for demo margin/notional handling
+  leverageCrypto             Float   @default(1)  // crypto: full notional must fit (no leverage)
+  leverageForex              Float   @default(30) // FX
+  leverageFutures            Float   @default(10) // futures
+  // Automated trading (autotrader)
+  autoTradeEnabled           Boolean @default(false) // scan & place on-hold auto-trades on schedule
+  autoTradeMinScore          Float   @default(75)     // min setup score to auto-place a pending trade
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +236,9 @@ model DemoTrade {
   stopLoss      Float
   takeProfit    Float
   positionSize  Float      @default(1)
+  margin        Float?     // dollar margin reserved while OPEN; null/0 once closed
+  pendingApproach String?  // for PENDING auto-trades: 'RISE' | 'FALL' — direction price must move to reach entry
+  expiresAt     DateTime?  // for PENDING auto-trades: auto-cancel time if entry never reached
   riskReward    Float      @default(0)
   aiScore       Float?
   confluences   String?    // JSON string
@@ -234,6 +249,7 @@ model DemoTrade {
   pnl           Float?
   pnlPercent    Float?
   rMultiple     Float?
+  dataSource    String?    // provenance of resolving bars, e.g. "REAL:yahoo" / "REAL:crypto"
   notes         String?
   tradeSetupId  String?
   openedAt      DateTime   @default(now())
@@ -243,6 +259,35 @@ model DemoTrade {
   @@index([userId, status])
   @@index([symbol])
   @@index([openedAt])
+}
+
+// Learning / history store: every detected setup logged at analyze time, later
+// linked to its realized demo-trade outcome so we can compute empirical hit-rates
+// and weight the AI score. userId is nullable (analyze can be unauthenticated).
+model SetupLog {
+  id           String    @id @default(cuid())
+  userId       String?
+  symbol       String
+  assetClass   String    // "futures" | "forex" | "crypto"
+  timeframe    String
+  bias         String    // "BULLISH" | "BEARISH" | "NEUTRAL"
+  direction    String    // "LONG" | "SHORT"
+  aiScore      Float
+  confluences  String    // JSON string array of confluence tags
+  entryPrice   Float?
+  stopLoss     Float?
+  takeProfit   Float?
+  detectedAt   DateTime  @default(now())
+  // Outcome linkage (filled when a matching demo trade resolves).
+  demoTradeId  String?
+  outcome      String?   // "WIN" | "LOSS" | null
+  rMultiple    Float?
+  resolvedAt   DateTime?
+
+  @@index([assetClass, timeframe])
+  @@index([outcome])
+  @@index([userId, symbol, direction])
+  @@index([detectedAt])
 }
 
 model BacktestRun {

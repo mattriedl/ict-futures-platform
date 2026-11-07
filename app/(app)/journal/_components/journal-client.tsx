@@ -5,19 +5,23 @@ import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import {
   History, Wallet, TrendingUp, TrendingDown, Target, Percent, Activity,
-  Plus, RefreshCw, Settings2, X, Loader2, Award, Flame, BarChart3,
+  Plus, RefreshCw, Settings2, X, Loader2, Award, Flame, BarChart3, Clock, Bot,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
 } from 'recharts';
 import { INSTRUMENTS, getInstrumentMeta } from '@/lib/instruments';
+import { formatPrice } from '@/lib/format';
 
 const fmt = (n: number | null | undefined, d = 2) =>
   (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const money = (n: number | null | undefined) =>
   `$${(n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Position size can be fractional (risk-based sizing). Show up to 4 dp, trimmed.
+const fmtSize = (n: number | null | undefined) =>
+  (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 
-type Tab = 'overview' | 'open' | 'history';
+type Tab = 'overview' | 'pending' | 'open' | 'history';
 
 export function JournalClient() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -44,8 +48,9 @@ export function JournalClient() {
 
   useEffect(() => { load(); }, [load]);
 
+  const pendingTrades = trades.filter((t) => t.status === 'PENDING');
   const openTrades = trades.filter((t) => t.status === 'OPEN');
-  const closedTrades = trades.filter((t) => t.status !== 'OPEN');
+  const closedTrades = trades.filter((t) => ['WIN', 'LOSS', 'CLOSED_MANUAL', 'CANCELLED'].includes(t.status));
 
   const closeTrade = async (id: string, exitPrice: number) => {
     try {
@@ -63,6 +68,17 @@ export function JournalClient() {
       await fetch(`/api/demo/trades/${id}`, { method: 'DELETE' });
       toast.success('Trade deleted'); load();
     } catch { toast.error('Delete failed'); }
+  };
+
+  const cancelTrade = async (id: string) => {
+    try {
+      const res = await fetch(`/api/demo/trades/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cancel: true }),
+      });
+      if (!res.ok) { toast.error((await res.json()).error || 'Cancel failed'); return; }
+      toast.success('Pending order cancelled'); load();
+    } catch { toast.error('Cancel failed'); }
   };
 
   const s = stats?.summary;
@@ -104,6 +120,16 @@ export function JournalClient() {
           <p className={`text-xs font-mono mt-1 ${(account?.realizedPnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
             {loading ? 'loading account…' : <>{(account?.realizedPnl ?? 0) >= 0 ? '+' : ''}{money(account?.realizedPnl)} realized · start {money(account?.account?.startingBalance)}</>}
           </p>
+          <div className="flex items-center gap-4 mt-3 pt-3 border-t border-white/10">
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">Available</p>
+              <p className="text-sm font-mono font-semibold text-emerald-400">{loading ? '—' : money(account?.availableBalance ?? account?.account?.currentBalance)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">Used Margin</p>
+              <p className="text-sm font-mono font-semibold text-amber-400">{loading ? '—' : money(account?.usedMargin ?? 0)}</p>
+            </div>
+          </div>
         </div>
         <StatCard label="Net P&L" value={`${netPositive ? '+' : ''}${money(s?.netPnl)}`} sub={`${s?.netPnlPercent >= 0 ? '+' : ''}${fmt(s?.netPnlPercent, 2)}%`} accent={netPositive ? 'green' : 'red'} icon={netPositive ? TrendingUp : TrendingDown} loading={loading} />
         <StatCard label="Win Rate" value={`${fmt(s?.winRate, 1)}%`} sub={`${s?.wins ?? 0}W / ${s?.losses ?? 0}L`} accent="blue" icon={Target} loading={loading} />
@@ -113,17 +139,18 @@ export function JournalClient() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 bg-[#1A1F35]/60 border border-white/5 rounded-lg p-1 w-fit">
-        {(['overview', 'open', 'history'] as Tab[]).map((t) => (
+        {(['overview', 'pending', 'open', 'history'] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-2 rounded-md text-sm font-medium capitalize transition-all ${
               tab === t ? 'bg-blue-500/20 text-blue-400' : 'text-gray-400 hover:text-white'
             }`}>
-            {t === 'open' ? `Open (${openTrades.length})` : t === 'history' ? `History (${closedTrades.length})` : 'Analytics'}
+            {t === 'pending' ? `Pending (${pendingTrades.length})` : t === 'open' ? `Open (${openTrades.length})` : t === 'history' ? `History (${closedTrades.length})` : 'Analytics'}
           </button>
         ))}
       </div>
 
       {tab === 'overview' && <Analytics stats={stats} loading={loading} />}
+      {tab === 'pending' && <PendingTrades trades={pendingTrades} onCancel={cancelTrade} onDelete={deleteTrade} />}
       {tab === 'open' && <OpenTrades trades={openTrades} onClose={closeTrade} onDelete={deleteTrade} />}
       {tab === 'history' && <TradeHistory trades={closedTrades} onDelete={deleteTrade} />}
 
@@ -239,6 +266,67 @@ function BreakdownTable({ title, rows, keyField }: { title: string; rows: any[];
   );
 }
 
+/* ---------------- Pending trades (auto/limit orders waiting for entry) ---------------- */
+function PendingTrades({ trades, onCancel, onDelete }: { trades: any[]; onCancel: (id: string) => void; onDelete: (id: string) => void }) {
+  if (trades.length === 0)
+    return <EmptyState label="No pending orders" hint="When automated trading finds a setup scoring at or above your threshold, it places a pending order here that activates once price reaches the entry." />;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-3">
+        <Clock className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+        <p className="text-xs text-amber-200/80">
+          Pending orders are staged with the analysis entry, stop and target. They are <span className="font-semibold">not yet live</span> — no margin is held and they do not count as open exposure. Each activates automatically once the live price reaches its entry, then tracks win/loss like any other trade. Stale orders expire after 24 hours.
+        </p>
+      </div>
+      <div className="bg-[#1A1F35]/60 backdrop-blur border border-white/5 rounded-xl overflow-hidden">
+        <div className="overflow-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-[#0D1121] text-gray-500 text-left">
+              <tr>
+                {['Symbol', 'Dir', 'Source', 'Entry (trigger)', 'Stop', 'Target', 'Size', 'R:R', 'Score', 'Waiting for', 'Placed', ''].map((h) => (
+                  <th key={h} className="px-4 py-2.5 font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {trades.map((t) => {
+                const approach = t.pendingApproach === 'RISE' ? 'price to rise ↑' : t.pendingApproach === 'FALL' ? 'price to fall ↓' : 'entry';
+                return (
+                  <tr key={t.id} className="border-t border-white/5 hover:bg-white/[0.02]">
+                    <td className="px-4 py-3 text-white font-mono font-semibold">{t.symbol.replace('=F', '')}</td>
+                    <td className="px-4 py-3"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${t.direction === 'LONG' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>{t.direction}</span></td>
+                    <td className="px-4 py-3"><SourceBadge source={t.source} /></td>
+                    <td className="px-4 py-3 text-amber-300 font-mono">{formatPrice(t.entryPrice)}</td>
+                    <td className="px-4 py-3 text-red-400/80 font-mono">{formatPrice(t.stopLoss)}</td>
+                    <td className="px-4 py-3 text-green-400/80 font-mono">{formatPrice(t.takeProfit)}</td>
+                    <td className="px-4 py-3 text-gray-300 font-mono">{fmtSize(t.positionSize)}</td>
+                    <td className="px-4 py-3 text-blue-400 font-mono">{fmt(t.riskReward, 1)}</td>
+                    <td className="px-4 py-3 text-gray-400 font-mono">{t.aiScore ?? '—'}</td>
+                    <td className="px-4 py-3 text-gray-400 whitespace-nowrap">{approach}</td>
+                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(t.openedAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="flex items-center gap-2 justify-end">
+                        <button onClick={() => onCancel(t.id)} className="text-amber-400 hover:text-amber-300 text-xs">Cancel</button>
+                        <button onClick={() => onDelete(t.id)} className="text-gray-600 hover:text-red-400"><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SourceBadge({ source }: { source: string }) {
+  if (source === 'AUTO') return <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400"><Bot className="w-3 h-3" /> Auto</span>;
+  if (source === 'ONE_CLICK') return <span className="text-[10px] text-amber-400">⚡ 1-Click</span>;
+  return <span className="text-[10px] text-gray-400">Manual</span>;
+}
+
 /* ---------------- Open trades ---------------- */
 function OpenTrades({ trades, onClose, onDelete }: { trades: any[]; onClose: (id: string, px: number) => void; onDelete: (id: string) => void }) {
   const [closing, setClosing] = useState<string | null>(null);
@@ -250,7 +338,7 @@ function OpenTrades({ trades, onClose, onDelete }: { trades: any[]; onClose: (id
         <table className="w-full text-xs">
           <thead className="bg-[#0D1121] text-gray-500 text-left">
             <tr>
-              {['Symbol', 'Dir', 'Source', 'Entry', 'Stop', 'Target', 'Size', 'R:R', 'Score', 'Opened', ''].map((h) => (
+              {['Symbol', 'Dir', 'Source', 'Entry', 'Stop', 'Target', 'Size', 'Margin', 'R:R', 'Score', 'Opened', ''].map((h) => (
                 <th key={h} className="px-4 py-2.5 font-medium whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -260,18 +348,19 @@ function OpenTrades({ trades, onClose, onDelete }: { trades: any[]; onClose: (id
               <tr key={t.id} className="border-t border-white/5 hover:bg-white/[0.02]">
                 <td className="px-4 py-3 text-white font-mono font-semibold">{t.symbol.replace('=F', '')}</td>
                 <td className="px-4 py-3"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${t.direction === 'LONG' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>{t.direction}</span></td>
-                <td className="px-4 py-3"><span className={`text-[10px] ${t.source === 'ONE_CLICK' ? 'text-amber-400' : 'text-gray-400'}`}>{t.source === 'ONE_CLICK' ? '⚡ 1-Click' : 'Manual'}</span></td>
-                <td className="px-4 py-3 text-white font-mono">{fmt(t.entryPrice)}</td>
-                <td className="px-4 py-3 text-red-400/80 font-mono">{fmt(t.stopLoss)}</td>
-                <td className="px-4 py-3 text-green-400/80 font-mono">{fmt(t.takeProfit)}</td>
-                <td className="px-4 py-3 text-gray-300 font-mono">{fmt(t.positionSize, 0)}</td>
+                <td className="px-4 py-3"><SourceBadge source={t.source} /></td>
+                <td className="px-4 py-3 text-white font-mono">{formatPrice(t.entryPrice)}</td>
+                <td className="px-4 py-3 text-red-400/80 font-mono">{formatPrice(t.stopLoss)}</td>
+                <td className="px-4 py-3 text-green-400/80 font-mono">{formatPrice(t.takeProfit)}</td>
+                <td className="px-4 py-3 text-gray-300 font-mono">{fmtSize(t.positionSize)}</td>
+                <td className="px-4 py-3 text-amber-400/90 font-mono">{t.margin != null ? money(t.margin) : '—'}</td>
                 <td className="px-4 py-3 text-blue-400 font-mono">{fmt(t.riskReward, 1)}</td>
                 <td className="px-4 py-3 text-gray-400 font-mono">{t.aiScore ?? '—'}</td>
                 <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(t.openedAt).toLocaleDateString()}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   {closing === t.id ? (
                     <div className="flex items-center gap-1 justify-end">
-                      <input autoFocus value={px} onChange={(e) => setPx(e.target.value)} placeholder="exit px"
+                      <input autoFocus value={px} onChange={(e) => setPx(e.target.value)} placeholder="exit px" type="number" step="any"
                         className="w-20 bg-[#0D1121] border border-white/10 rounded px-2 py-1 text-xs text-white font-mono outline-none focus:border-blue-500/50" />
                       <button onClick={() => { const v = parseFloat(px); if (!isNaN(v)) { onClose(t.id, v); setClosing(null); setPx(''); } }}
                         className="text-green-400 hover:text-green-300 text-xs px-2">Close</button>
@@ -314,16 +403,16 @@ function TradeHistory({ trades, onDelete }: { trades: any[]; onDelete: (id: stri
                 <tr key={t.id} className="border-t border-white/5 hover:bg-white/[0.02]">
                   <td className="px-4 py-3 text-white font-mono font-semibold">{t.symbol.replace('=F', '')}</td>
                   <td className="px-4 py-3"><span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${t.direction === 'LONG' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>{t.direction}</span></td>
-                  <td className="px-4 py-3 text-white font-mono">{fmt(t.entryPrice)}</td>
-                  <td className="px-4 py-3 text-gray-300 font-mono">{t.exitPrice == null ? '—' : fmt(t.exitPrice)}</td>
-                  <td className="px-4 py-3 text-gray-300 font-mono">{fmt(t.positionSize, 0)}</td>
+                  <td className="px-4 py-3 text-white font-mono">{formatPrice(t.entryPrice)}</td>
+                  <td className="px-4 py-3 text-gray-300 font-mono">{t.exitPrice == null ? '—' : formatPrice(t.exitPrice)}</td>
+                  <td className="px-4 py-3 text-gray-300 font-mono">{fmtSize(t.positionSize)}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                       t.status === 'WIN' ? 'bg-green-500/10 text-green-400' : t.status === 'LOSS' ? 'bg-red-500/10 text-red-400' : 'bg-gray-500/10 text-gray-400'
                     }`}>{t.status === 'CLOSED_MANUAL' ? 'MANUAL' : t.status}</span>
                   </td>
-                  <td className={`px-4 py-3 font-mono ${(t.rMultiple ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{t.rMultiple == null ? '—' : `${t.rMultiple >= 0 ? '+' : ''}${fmt(t.rMultiple, 2)}`}</td>
-                  <td className={`px-4 py-3 font-mono font-semibold ${win ? 'text-green-400' : 'text-red-400'}`}>{t.pnl == null ? '—' : `${win ? '+' : ''}${money(t.pnl)}`}</td>
+                  <td className={`px-4 py-3 font-mono ${t.rMultiple == null ? 'text-gray-500' : (t.rMultiple ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>{t.rMultiple == null ? '—' : `${t.rMultiple >= 0 ? '+' : ''}${fmt(t.rMultiple, 2)}`}</td>
+                  <td className={`px-4 py-3 font-mono font-semibold ${t.pnl == null ? 'text-gray-500' : win ? 'text-green-400' : 'text-red-400'}`}>{t.pnl == null ? '—' : `${win ? '+' : ''}${money(t.pnl)}`}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{t.closedAt ? new Date(t.closedAt).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3 text-right"><button onClick={() => onDelete(t.id)} className="text-gray-600 hover:text-red-400"><X className="w-3.5 h-3.5" /></button></td>
                 </tr>
@@ -343,6 +432,7 @@ function ManualTradeModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
   const [entryPrice, setEntry] = useState('');
   const [stopLoss, setStop] = useState('');
   const [takeProfit, setTarget] = useState('');
+  const [autoSize, setAutoSize] = useState(true);
   const [positionSize, setSize] = useState('1');
   const [timeframe, setTimeframe] = useState('15m');
   const [notes, setNotes] = useState('');
@@ -352,7 +442,7 @@ function ManualTradeModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
   const e = parseFloat(entryPrice), sl = parseFloat(stopLoss), tp = parseFloat(takeProfit);
   const rr = !isNaN(e) && !isNaN(sl) && !isNaN(tp) && Math.abs(e - sl) > 0
     ? Math.round((Math.abs(tp - e) / Math.abs(e - sl)) * 100) / 100 : null;
-  const risk$ = !isNaN(e) && !isNaN(sl) && meta ? Math.abs(e - sl) * meta.pointValue * (parseFloat(positionSize) || 1) : null;
+  const risk$ = !autoSize && !isNaN(e) && !isNaN(sl) && meta ? Math.abs(e - sl) * meta.pointValue * (parseFloat(positionSize) || 1) : null;
 
   const save = async () => {
     setSaving(true);
@@ -361,7 +451,10 @@ function ManualTradeModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           symbol, direction, entryPrice: e, stopLoss: sl, takeProfit: tp,
-          positionSize: parseFloat(positionSize) || 1, timeframe, source: 'MANUAL', notes: notes || null,
+          // Auto risk-based sizing by default; the server sizes from the
+          // account's risk-per-trade setting. Uncheck to enter a fixed size.
+          ...(autoSize ? { autoSize: true } : { positionSize: parseFloat(positionSize) || 1 }),
+          timeframe, source: 'MANUAL', notes: notes || null,
         }),
       });
       const json = await res.json();
@@ -388,12 +481,19 @@ function ManualTradeModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <Field label="Entry"><input value={entryPrice} onChange={(e) => setEntry(e.target.value)} type="number" className="modal-input font-mono" placeholder="0.00" /></Field>
-          <Field label="Stop Loss"><input value={stopLoss} onChange={(e) => setStop(e.target.value)} type="number" className="modal-input font-mono" placeholder="0.00" /></Field>
-          <Field label="Take Profit"><input value={takeProfit} onChange={(e) => setTarget(e.target.value)} type="number" className="modal-input font-mono" placeholder="0.00" /></Field>
+          <Field label="Entry"><input value={entryPrice} onChange={(e) => setEntry(e.target.value)} type="number" step="any" className="modal-input font-mono" placeholder="0.00" /></Field>
+          <Field label="Stop Loss"><input value={stopLoss} onChange={(e) => setStop(e.target.value)} type="number" step="any" className="modal-input font-mono" placeholder="0.00" /></Field>
+          <Field label="Take Profit"><input value={takeProfit} onChange={(e) => setTarget(e.target.value)} type="number" step="any" className="modal-input font-mono" placeholder="0.00" /></Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Position size (contracts)"><input value={positionSize} onChange={(e) => setSize(e.target.value)} type="number" min="1" className="modal-input font-mono" /></Field>
+          <Field label="Position size">
+            <label className="flex items-center gap-2 mb-1.5 cursor-pointer select-none">
+              <input type="checkbox" checked={autoSize} onChange={(e) => setAutoSize(e.target.checked)} className="accent-blue-500" />
+              <span className="text-[11px] text-gray-400">Auto (risk-based)</span>
+            </label>
+            <input value={autoSize ? '' : positionSize} onChange={(e) => setSize(e.target.value)} type="number" step="any" min="0" disabled={autoSize}
+              placeholder={autoSize ? 'sized from risk %' : ''} className="modal-input font-mono disabled:opacity-50" />
+          </Field>
           <Field label="Timeframe">
             <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)} className="modal-input">
               {['1m', '5m', '15m', '1h', '4h', '1d'].map((tf) => <option key={tf} value={tf}>{tf}</option>)}

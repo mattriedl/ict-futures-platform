@@ -8,6 +8,7 @@ import { computeTradePnl } from '@/lib/demo-trades';
 
 const patchSchema = z.object({
   exitPrice: z.number().positive().optional(), // manual close
+  cancel: z.boolean().optional(),              // cancel a PENDING auto-trade
   notes: z.string().nullable().optional(),
 });
 
@@ -34,7 +35,27 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   if (!parsed.success) {
     return NextResponse.json({ error: 'Validation failed', details: parsed.error.flatten() }, { status: 400 });
   }
-  const { exitPrice, notes } = parsed.data;
+  const { exitPrice, cancel, notes } = parsed.data;
+
+  // Cancel a PENDING auto-trade (no balance/margin change — pending reserves none).
+  if (cancel === true) {
+    if (trade.status !== 'PENDING') {
+      return NextResponse.json({ error: 'Only pending orders can be cancelled.' }, { status: 400 });
+    }
+    const res = await prisma.demoTrade.updateMany({
+      where: { id: trade.id, status: 'PENDING' },
+      data: {
+        status: 'CANCELLED',
+        closedAt: new Date(),
+        notes: (trade.notes ? trade.notes + ' ' : '') + 'Cancelled by user.',
+      },
+    });
+    if (res.count !== 1) {
+      return NextResponse.json({ error: 'Order is no longer pending.' }, { status: 409 });
+    }
+    const updated = await prisma.demoTrade.findUnique({ where: { id: trade.id } });
+    return NextResponse.json({ trade: updated });
+  }
 
   // Manual close at a provided exit price (only allowed while OPEN).
   if (exitPrice != null) {
@@ -55,6 +76,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
           pnlPercent: pnlRes.pnlPercent,
           rMultiple: pnlRes.rMultiple,
           closedAt: new Date(),
+          // Release reserved margin when the position closes.
+          margin: null,
           ...(notes !== undefined ? { notes } : {}),
         },
       });

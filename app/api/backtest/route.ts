@@ -14,6 +14,7 @@ const configSchema = z.object({
   requiredConfluences: z.array(z.string()).default([]),
   minAiScore: z.number().min(0).max(100).default(0),
   riskPerTrade: z.number().positive().default(1),
+  intendedSizeUsd: z.number().positive().max(100000000).optional(),
 });
 
 export async function GET() {

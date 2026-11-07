@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
+import { getLlmConfig, chatCompletionsUrl } from '@/lib/llm';
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,14 +46,22 @@ Provide:
       },
     ];
 
-    const response = await fetch('https://apps.abacus.ai/v1/chat/completions', {
+    const llm = getLlmConfig();
+    if (!llm.configured) {
+      return new Response(
+        JSON.stringify({ error: 'AI analysis is not configured. Set LLM_BASE_URL and LLM_API_KEY.' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    const response = await fetch(chatCompletionsUrl(llm.baseUrl), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ABACUSAI_API_KEY}`,
+        'Authorization': `Bearer ${llm.apiKey}`,
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-5',
+        model: llm.model,
         messages,
         stream: true,
         max_tokens: 1200,

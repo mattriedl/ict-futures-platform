@@ -1,0 +1,9 @@
+[Unit]
+Description=Run ICT Autotrader local backstop every hour (mid-hour, offset from platform task)
+
+[Timer]
+OnCalendar=*-*-* *:49:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

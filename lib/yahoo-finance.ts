@@ -86,14 +86,28 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3): P
   throw new Error('Max retries exceeded');
 }
 
-export async function fetchYahooFinanceData(
+export interface MarketDataResult {
+  bars: OHLCVBar[];
+  synthetic: boolean; // true whenever ANY synthetic fallback was used
+  source: string;     // provenance of the bars, e.g. 'yahoo'
+}
+
+/**
+ * Like fetchYahooFinanceData but also reports whether synthetic (fake) bars were
+ * used. `synthetic` is true if the fetch failed OR too few real bars came back
+ * and we fell back to generateSyntheticBars. Callers that require REAL data only
+ * (e.g. the demo-trade resolver) must check this flag and refuse to act on
+ * synthetic bars.
+ */
+export async function fetchYahooFinanceDataWithMeta(
   symbol: string,
   timeframe: string = '15m'
-): Promise<OHLCVBar[]> {
+): Promise<MarketDataResult> {
   const tf = TIMEFRAME_MAP[timeframe] ?? TIMEFRAME_MAP['15m'];
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${tf.interval}&range=${tf.range}&includePrePost=true&corsDomain=finance.yahoo.com`;
 
   let bars: OHLCVBar[] = [];
+  let synthetic = false;
 
   try {
     const res = await fetchWithRetry(url, {
@@ -132,20 +146,33 @@ export async function fetchYahooFinanceData(
   } catch (err: any) {
     console.warn(`Yahoo Finance fetch failed for ${symbol}, using synthetic data:`, err?.message);
     bars = generateSyntheticBars(symbol, timeframe);
+    synthetic = true;
   }
 
   // If we got back empty data, fall back to synthetic
   if (bars.length < 10) {
     console.warn(`Insufficient data for ${symbol} (${bars.length} bars), using synthetic data`);
     bars = generateSyntheticBars(symbol, timeframe);
+    synthetic = true;
   }
 
   // For 4h, aggregate 1h bars into 4h
   if (timeframe === '4h') {
-    return aggregate4H(bars);
+    return { bars: aggregate4H(bars), synthetic, source: 'yahoo' };
   }
 
-  return bars;
+  return { bars, synthetic, source: 'yahoo' };
+}
+
+/**
+ * Backward-compatible wrapper: returns just the bars (real or synthetic).
+ * Use fetchYahooFinanceDataWithMeta when you need to know if bars are synthetic.
+ */
+export async function fetchYahooFinanceData(
+  symbol: string,
+  timeframe: string = '15m'
+): Promise<OHLCVBar[]> {
+  return (await fetchYahooFinanceDataWithMeta(symbol, timeframe)).bars;
 }
 
 function aggregate4H(bars: OHLCVBar[]): OHLCVBar[] {

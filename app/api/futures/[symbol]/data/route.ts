@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchYahooFinanceData, getSessionInfo } from '@/lib/yahoo-finance';
+import { getSessionInfo } from '@/lib/yahoo-finance';
+import { fetchMarketData } from '@/lib/market-data';
 
 export async function GET(
   request: NextRequest,
@@ -11,7 +12,7 @@ export async function GET(
     const symbol    = params?.symbol ?? '';
     const timeframe = request.nextUrl.searchParams.get('timeframe') ?? '15m';
 
-    const bars       = await fetchYahooFinanceData(symbol, timeframe);
+    const bars       = await fetchMarketData(symbol, timeframe);
     const sessionInfo = getSessionInfo();
 
     const lastBar  = bars?.[bars.length - 1];

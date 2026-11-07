@@ -1,0 +1,30 @@
+# nginx reverse-proxy vhost template for a non-Docker (bare-metal / VPS) deployment.
+#
+# 1) Replace __SERVER_NAME__ (your domain) and __APP_PORT__ (default 3456).
+# 2) Install:
+#      sudo cp nginx.conf.template /etc/nginx/sites-available/ict-futures.conf
+#      sudo ln -s /etc/nginx/sites-available/ict-futures.conf /etc/nginx/sites-enabled/
+#      sudo nginx -t && sudo systemctl reload nginx
+# 3) For HTTPS, run certbot afterwards:
+#      sudo certbot --nginx -d __SERVER_NAME__
+
+server {
+    listen 80;
+    server_name __SERVER_NAME__;
+
+    # Increase if you proxy large uploads.
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://127.0.0.1:__APP_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+    }
+}

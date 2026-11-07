@@ -1,0 +1,40 @@
+# systemd unit template for a non-Docker (bare-metal / VPS) deployment.
+#
+# 1) Replace the __PLACEHOLDERS__ below.
+# 2) Install:
+#      sudo cp ict-futures.service.template /etc/systemd/system/ict-futures.service
+#      sudo systemctl daemon-reload
+#      sudo systemctl enable --now ict-futures
+# 3) Logs:  journalctl -u ict-futures -f
+#
+# Prerequisites (run once as the service user, in the project dir):
+#      npm ci --legacy-peer-deps
+#      npx prisma generate
+#      npx prisma migrate deploy
+#      npx tsx --require dotenv/config scripts/safe-seed.ts   # optional seed
+#      npm run build                                           # produces .build/
+
+[Unit]
+Description=ICT Futures Trading Platform (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# User that owns the project files.
+User=__RUN_USER__
+# Absolute path to the project root (the nextjs_space directory).
+WorkingDirectory=__PROJECT_DIR__
+# Loads DATABASE_URL, NEXTAUTH_*, LLM_*, etc. from the project .env file.
+EnvironmentFile=__PROJECT_DIR__/.env
+Environment=NODE_ENV=production
+Environment=PORT=__APP_PORT__
+Environment=NEXT_DIST_DIR=.build
+ExecStart=/usr/bin/node node_modules/.bin/next start --port __APP_PORT__
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ict-futures
+
+[Install]
+WantedBy=multi-user.target

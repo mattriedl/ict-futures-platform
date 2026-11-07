@@ -26,10 +26,25 @@ export async function GET() {
   const realizedPnl = closed.reduce((s, t) => s + (t.pnl ?? 0), 0);
   const openCount = await prisma.demoTrade.count({ where: { userId: user.id, status: 'OPEN' } });
 
+  // Margin summary. Margin is a reservation, so available balance = current
+  // balance minus the sum of margin reserved by all open trades. Margin level
+  // is equity / used margin (equity here is the current balance).
+  const marginAgg = await prisma.demoTrade.aggregate({
+    where: { userId: user.id, status: 'OPEN' },
+    _sum: { margin: true },
+  });
+  const usedMargin = Math.round((marginAgg._sum.margin ?? 0) * 100) / 100;
+  const availableBalance = Math.round((account.currentBalance - usedMargin) * 100) / 100;
+  const marginLevelPercent =
+    usedMargin > 0 ? Math.round((account.currentBalance / usedMargin) * 100 * 100) / 100 : null;
+
   return NextResponse.json({
     account,
     realizedPnl: Math.round(realizedPnl * 100) / 100,
     openTrades: openCount,
+    usedMargin,
+    availableBalance,
+    marginLevelPercent,
   });
 }
 

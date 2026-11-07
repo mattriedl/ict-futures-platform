@@ -40,3 +40,10 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Local env backups (contain secrets)
+.env.bak.*
+.env.*.bak
+
+# Alternate Next.js build dir (NEXT_DIST_DIR)
+.build/
