@@ -14,8 +14,9 @@
 #   4. npm ci, prisma migrate deploy, seed instruments, production build.
 #   5. systemd: ict-staging.service (Next.js on 127.0.0.1:<port>),
 #      ict-staging-cycle.timer (autotrader + alerts every 30 min),
-#      ict-staging-sync.timer (every 2 min: pull new commits on <branch>,
-#      rebuild, migrate, restart — a failed build leaves the site unchanged).
+#      ict-staging-sync.timer (every 2 min: pull new commits on <branch> and
+#      build them in a separate release folder, then switch — the live site is
+#      never touched mid-build and a failed build leaves it unchanged).
 #   6. Apache reverse-proxy vhost for <domain> + Let's Encrypt certificate.
 # ---------------------------------------------------------------------------
 set -euo pipefail
@@ -117,7 +118,8 @@ Wants=network-online.target
 
 [Service]
 User=$RUN_USER
-WorkingDirectory=$APP
+# 'current' points at the active release (see ict-staging-sync).
+WorkingDirectory=$BASE/current
 EnvironmentFile=$APP/.env
 Environment=NODE_ENV=production
 Environment=NEXT_DIST_DIR=.build
