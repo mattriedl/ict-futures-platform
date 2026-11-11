@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/authz';
-import { getOrCreateDemoAccount, evaluateOpenTrades, getDrawdownStatus } from '@/lib/demo-trades';
+import { getOrCreateDemoAccount, evaluateOpenTradesForUser, getDrawdownStatus } from '@/lib/demo-trades';
 import { getInstrumentMeta } from '@/lib/instruments';
 import { getLeverageForSymbol, computeNotional, computeRequiredMargin } from '@/lib/margin';
 import { fetchLiveQuote } from '@/lib/live-quote';
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
   // Refresh open trades before returning so statuses are current.
   try {
-    await evaluateOpenTrades(user.id);
+    await evaluateOpenTradesForUser(user.id);
   } catch (e) {
     console.warn('evaluateOpenTrades failed:', (e as Error).message);
   }

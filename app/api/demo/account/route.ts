@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/authz';
-import { getOrCreateDemoAccount, evaluateOpenTrades, reconcileDemoBalance } from '@/lib/demo-trades';
+import { getOrCreateDemoAccount, evaluateOpenTradesForUser, reconcileDemoBalance } from '@/lib/demo-trades';
 
 export async function GET() {
   const auth = await requireUser();
@@ -12,7 +12,7 @@ export async function GET() {
   const { user } = auth;
 
   try {
-    await evaluateOpenTrades(user.id);
+    await evaluateOpenTradesForUser(user.id);
   } catch {
     /* non-fatal */
   }

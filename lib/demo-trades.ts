@@ -238,6 +238,31 @@ export async function evaluateOpenTrades(userId?: string): Promise<number> {
   return resolvedCount;
 }
 
+// ---------------------------------------------------------------------------
+// Page-load evaluation, de-duplicated.
+// The journal loads trades, account and stats in parallel, and each used to run
+// a full evaluation (one market-data fetch per open symbol). Requests for the
+// same user now share one in-flight evaluation, and a user isn't re-evaluated
+// more than once per USER_EVAL_MIN_INTERVAL_MS. The scheduled cycle still calls
+// evaluateOpenTrades() directly.
+// ---------------------------------------------------------------------------
+const USER_EVAL_MIN_INTERVAL_MS = 30_000;
+const userEvalInFlight = new Map<string, Promise<number>>();
+const userEvalLastRun = new Map<string, number>();
+
+export function evaluateOpenTradesForUser(userId: string): Promise<number> {
+  const inflight = userEvalInFlight.get(userId);
+  if (inflight) return inflight;
+  const last = userEvalLastRun.get(userId) ?? 0;
+  if (Date.now() - last < USER_EVAL_MIN_INTERVAL_MS) return Promise.resolve(0);
+  const p = evaluateOpenTrades(userId).finally(() => {
+    userEvalLastRun.set(userId, Date.now());
+    userEvalInFlight.delete(userId);
+  });
+  userEvalInFlight.set(userId, p);
+  return p;
+}
+
 /**
  * Recompute the demo account's currentBalance authoritatively as
  *   startingBalance + sum(pnl of all realized/closed trades)

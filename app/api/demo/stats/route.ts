@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/authz';
-import { getOrCreateDemoAccount, evaluateOpenTrades, reconcileDemoBalance } from '@/lib/demo-trades';
+import { getOrCreateDemoAccount, evaluateOpenTradesForUser, reconcileDemoBalance } from '@/lib/demo-trades';
 
 /**
  * Aggregate demo-trading statistics for the current user.
@@ -17,7 +17,7 @@ export async function GET() {
   const { user } = auth;
 
   try {
-    await evaluateOpenTrades(user.id);
+    await evaluateOpenTradesForUser(user.id);
   } catch {
     /* non-fatal */
   }
