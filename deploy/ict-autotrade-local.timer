@@ -1,8 +1,10 @@
 [Unit]
-Description=Run the ICT Futures scheduled cycle every 30 minutes
+Description=Run the ICT Futures scheduled cycle every 5 minutes
 
 [Timer]
-OnCalendar=*-*-* *:19,49:00
+# 15m setups often stay valid for only a few minutes; a full cycle takes ~30s.
+OnCalendar=*-*-* *:00/5:20
+AccuracySec=5s
 Persistent=true
 
 [Install]

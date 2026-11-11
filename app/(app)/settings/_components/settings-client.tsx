@@ -408,13 +408,13 @@ export function SettingsClient() {
           <h2 className="text-lg font-display font-semibold text-white">Automated Trading</h2>
         </div>
         <p className="text-xs text-gray-500 mb-5">
-          When enabled, the app scans every active instrument every 30 minutes. For a setup scoring at or above the threshold below, it opens a demo trade at the live price, but only while the setup is still tradeable (price between entry and target, at least 1:1 reward left), so setups that already played out are skipped. Trades use your risk-per-trade setting and available balance.
+          When enabled, the app scans every active instrument every 5 minutes. For a setup scoring at or above the threshold below, it opens a demo trade at the live price, but only while the setup is still tradeable (price between entry and target, at least 1:1 reward left), so setups that already played out are skipped. Trades use your risk-per-trade setting and available balance.
         </p>
 
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="text-sm text-white">Enable automated trading</div>
-            <div className="text-[11px] text-gray-600">Runs every 30 minutes; opens trades at the live price.</div>
+            <div className="text-[11px] text-gray-600">Runs every 5 minutes; opens trades at the live price.</div>
           </div>
           <button
             type="button"

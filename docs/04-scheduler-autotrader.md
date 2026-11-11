@@ -57,7 +57,7 @@ To guarantee the cycle still runs if the platform task is unavailable (a 6-hour 
 |---|---|
 | `deploy/ict-autotrade-local.sh` | Wrapper: reads `AUTOTRADE_SECRET` / `APP_PORT` from the app's `.env`, POSTs to the local autotrade endpoint, logs a one-line summary, exits non-zero on failure. Self-contained (no external helper script). |
 | `deploy/ict-autotrade-local.service` | `oneshot` service that runs the wrapper. Replace `__RUN_USER__` / `__PROJECT_DIR__`. |
-| `deploy/ict-autotrade-local.timer` | Fires at :19 and :49 every hour (every 30 min), `Persistent=true` so missed runs fire on boot. |
+| `deploy/ict-autotrade-local.timer` | Fires at :19 and :49 every hour (every 5 min), `Persistent=true` so missed runs fire on boot. |
 
 With the Abacus platform task gone, this timer is the scheduler.
 
@@ -76,10 +76,10 @@ systemctl list-timers ict-autotrade-local.timer   # verify next run
 
 ## 5. Recreating the schedule on a new server (plain cron)
 
-If you are not using systemd, a cron entry is the simplest portable option. Example — run every 30 minutes:
+If you are not using systemd, a cron entry is the simplest portable option. Example — run every 5 minutes:
 
 ```cron
-*/30 * * * * curl -s -X POST "http://localhost:3456/api/demo/autotrade" -H "x-autotrade-secret: YOUR_SECRET" >> /var/log/ict-autotrade.log 2>&1
+*/5 * * * * curl -s -X POST "http://localhost:3456/api/demo/autotrade" -H "x-autotrade-secret: YOUR_SECRET" >> /var/log/ict-autotrade.log 2>&1
 ```
 
 Edit with `crontab -e`. Replace `YOUR_SECRET` with the value of `AUTOTRADE_SECRET`, and adjust port/host to match your deployment. For redundancy you can add a second entry at a staggered minute.

@@ -41,7 +41,7 @@ NEXT_DIST_DIR=.build npm run build && NEXT_DIST_DIR=.build npm start
 
 ## Known issues / backlog
 - `NEXT_PUBLIC_APPLLM_LIB_URL` (Abacus script tag) and the `ABACUSAI_API_KEY` fallback remain for back-compat; both are inert when unset.
-- The Abacus "ICT Autotrader" scheduled task does not migrate; `deploy/ict-autotrade-local.timer` (every 30 min) replaces it.
+- The Abacus "ICT Autotrader" scheduled task does not migrate; `deploy/ict-autotrade-local.timer` (every 5 min) replaces it.
 
 ## Fixed in the Nov 2026 audit (don't regress)
 - All data/AI/insights/liquidity API routes require a session; roles are read from the DB on each request (`lib/authz.ts`).

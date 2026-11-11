@@ -13,7 +13,7 @@
 #   3. Writes /opt/ict-staging/app/.env with fresh random secrets (kept on re-run).
 #   4. npm ci, prisma migrate deploy, seed instruments, production build.
 #   5. systemd: ict-staging.service (Next.js on 127.0.0.1:<port>),
-#      ict-staging-cycle.timer (autotrader + alerts every 30 min),
+#      ict-staging-cycle.timer (autotrader + alerts every 5 min),
 #      ict-staging-sync.timer (every 2 min: pull new commits on <branch> and
 #      build them in a separate release folder, then switch — the live site is
 #      never touched mid-build and a failed build leaves it unchanged).
@@ -144,10 +144,11 @@ ExecStart=$APP/deploy/ict-autotrade-local.sh
 UNIT
 cat > /etc/systemd/system/ict-staging-cycle.timer <<UNIT
 [Unit]
-Description=ICT Futures TEST SITE cycle every 30 minutes
+Description=ICT Futures TEST SITE cycle every 5 minutes
 
 [Timer]
-OnCalendar=*-*-* *:19,49:00
+OnCalendar=*-*-* *:00/5:20
+AccuracySec=5s
 Persistent=true
 
 [Install]
