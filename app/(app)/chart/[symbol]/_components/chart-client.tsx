@@ -567,8 +567,13 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
               <div className={`flex items-center gap-2 mb-3 px-3 py-2 rounded-lg ${setup?.direction === 'BULLISH' ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
                 {setup?.direction === 'BULLISH' ? <TrendingUp className="w-4 h-4 text-green-400" /> : <TrendingDown className="w-4 h-4 text-red-400" />}
                 <span className={`text-sm font-semibold ${setup?.direction === 'BULLISH' ? 'text-green-400' : 'text-red-400'}`}>{setup?.direction} Setup</span>
-                <span className="ml-auto text-xs text-gray-500">Score: {setup?.aiScore}/100</span>
+                <span className="ml-auto text-xs text-gray-500">Score: {setup?.weightedScore ?? setup?.aiScore}/100</span>
               </div>
+              {setup?.liveStatus && setup.liveStatus !== 'FRESH' && (
+                <div className="mb-3 px-3 py-2 rounded-lg bg-gray-500/10 border border-white/5 text-[11px] text-gray-400">
+                  {setup.liveStatusLabel}. Not tradeable at the current price — the autotrader skips it and One-Click will refuse it.
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2 text-sm">
                 {[
                   { label: 'Entry',       value: formatPrice(setup?.entryPrice, symbol), color: 'text-white'   },
@@ -602,7 +607,7 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
                       stopLoss: setup.stopLoss,
                       takeProfit: setup.takeProfit,
                       riskReward: setup.riskReward,
-                      aiScore: setup.aiScore,
+                      aiScore: setup.weightedScore ?? setup.aiScore,
                       confluences: setup.confluences ?? [],
                       timeframe,
                     }}

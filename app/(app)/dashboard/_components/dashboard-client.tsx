@@ -198,7 +198,13 @@ export function DashboardClient() {
   // kept sorted by aiScore descending. Cap the rendered rows so a large qualifying
   // list stays scrollable instead of overflowing the layout.
   const MAX_VISIBLE_SETUPS = 25;
-  const qualifyingSetups = allSetups.filter((s: any) => scoreOf(s) >= minScore);
+  // Tradeable-now setups first; ones that already played out (or moved past the
+  // entry) stay visible but dimmed, with the reason — the autotrader skips them.
+  const isFresh = (s: any) => !s?.liveStatus || s.liveStatus === 'FRESH';
+  const qualifyingSetups = allSetups
+    .filter((s: any) => scoreOf(s) >= minScore)
+    .sort((a: any, b: any) => Number(isFresh(b)) - Number(isFresh(a)) || scoreOf(b) - scoreOf(a));
+  const freshCount = qualifyingSetups.filter(isFresh).length;
   const visibleSetups = qualifyingSetups.slice(0, MAX_VISIBLE_SETUPS);
 
   const sessions = [
@@ -389,7 +395,7 @@ export function DashboardClient() {
               <span className="text-xs text-gray-500">
                 {loading
                   ? 'Scanning…'
-                  : `${qualifyingSetups.length} ${qualifyingSetups.length === 1 ? 'opportunity' : 'opportunities'} clearing your ${minScore} score filter`}
+                  : `${freshCount} tradeable now · ${qualifyingSetups.length} clearing your ${minScore} score filter`}
               </span>
             </div>
             <div className="p-4 space-y-3 max-h-[640px] overflow-y-auto">
@@ -412,7 +418,7 @@ export function DashboardClient() {
                     transition={{ delay: idx * 0.1 }}
                   >
                     <Link href={`/chart/${encodeURIComponent(setup?.symbol ?? '')}`}>
-                      <div className="bg-[#0D1121]/60 border border-white/5 rounded-lg p-4 hover:border-white/10 transition-all">
+                      <div className={`bg-[#0D1121]/60 border border-white/5 rounded-lg p-4 hover:border-white/10 transition-all ${isFresh(setup) ? '' : 'opacity-50'}`}>
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-3">
                             <span className="text-white font-semibold font-mono">{setup?.shortName}</span>
@@ -422,13 +428,21 @@ export function DashboardClient() {
                               {setup?.direction === 'BULLISH' ? <TrendingUp className="w-3 h-3 inline mr-1" /> : <TrendingDown className="w-3 h-3 inline mr-1" />}
                               {setup?.direction}
                             </span>
+                            {!isFresh(setup) && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-500/15 text-gray-400" title={setup?.liveStatusLabel}>
+                                {setup?.liveStatus === 'TARGET_HIT' ? 'Played out'
+                                  : setup?.liveStatus === 'STOPPED' ? 'Invalidated'
+                                  : setup?.liveStatus === 'NO_QUOTE' ? 'No live price'
+                                  : 'Not tradeable now'}
+                              </span>
+                            )}
                           </div>
                           <div className="text-right">
                             <p className="text-xs text-gray-500">AI Score</p>
                             <p className={`text-lg font-mono font-bold ${
-                              (setup?.aiScore ?? 0) >= 70 ? 'text-green-400' : (setup?.aiScore ?? 0) >= 40 ? 'text-amber-400' : 'text-red-400'
+                              scoreOf(setup) >= 70 ? 'text-green-400' : scoreOf(setup) >= 40 ? 'text-amber-400' : 'text-red-400'
                             }`}>
-                              {setup?.aiScore ?? 0}
+                              {scoreOf(setup)}
                             </p>
                           </div>
                         </div>
@@ -438,6 +452,9 @@ export function DashboardClient() {
                           <div><span className="text-gray-500">Take Profit</span><p className="text-green-400 font-mono">{setup?.takeProfit != null ? formatPrice(setup.takeProfit, { grouping: true }) : '--'}</p></div>
                           <div><span className="text-gray-500">R:R</span><p className="text-blue-400 font-mono">{setup?.riskReward ?? '--'}</p></div>
                         </div>
+                        {!isFresh(setup) && setup?.liveStatusLabel && (
+                          <p className="text-[11px] text-gray-500 mt-2">{setup.liveStatusLabel}. The autotrader won&apos;t open this one.</p>
+                        )}
                         <div className="flex gap-1.5 mt-3 flex-wrap">
                           {(setup?.confluences ?? []).map((c: string, ci: number) => (
                             <span key={ci} className="text-[10px] px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded-full">

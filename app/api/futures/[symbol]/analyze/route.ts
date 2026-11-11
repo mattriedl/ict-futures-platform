@@ -9,6 +9,7 @@ import { fetchMarketData } from '@/lib/market-data';
 import { analyzeICT, scoreConfluence, generateTradeSetup } from '@/lib/ict-engine';
 import { deriveAssetClass, biasToDirection, computeWeightedScore } from '@/lib/setup-stats';
 import { fetchLiveQuote } from '@/lib/live-quote';
+import { setupLiveStatus, SETUP_STATUS_LABEL } from '@/lib/setup-status';
 
 export async function GET(
   request: NextRequest,
@@ -33,10 +34,12 @@ export async function GET(
     // Reported current price should match the live, timeframe-independent header
     // quote. Best-effort: fall back to the last candle close on any failure.
     let currentPrice = lastBar?.close ?? 0;
+    let livePrice: number | null = null;
     try {
       const liveQuote = await fetchLiveQuote(symbol);
       if (liveQuote && !liveQuote.stale && liveQuote.price != null) {
         currentPrice = liveQuote.price;
+        livePrice = liveQuote.price;
       }
     } catch {
       // keep candle-derived fallback
@@ -108,6 +111,13 @@ export async function GET(
       } catch (logErr) {
         console.error('SetupLog write skipped:', (logErr as Error)?.message);
       }
+    }
+
+    // Is the setup still tradeable at the live price? (Same rules as the
+    // autotrader / one-click.) Lets the UI flag setups that already played out.
+    if (enrichedSetup) {
+      const liveStatus = setupLiveStatus(enrichedSetup, livePrice);
+      enrichedSetup = { ...enrichedSetup, liveStatus, liveStatusLabel: SETUP_STATUS_LABEL[liveStatus] };
     }
 
     return NextResponse.json({
