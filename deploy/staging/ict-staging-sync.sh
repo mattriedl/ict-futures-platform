@@ -39,8 +39,8 @@ as_app mkdir -p "$REL"
 as_app git archive HEAD | as_app tar -x -C "$REL"
 as_app ln -s "$APP/.env" "$REL/.env"
 if ! as_app bash -c "set -e; cd '$REL'; npm ci --no-audit --no-fund --loglevel=error && npx prisma generate >/dev/null \
-      && NEXT_DIST_DIR=.build npx next build" > /tmp/ict-staging-build.log 2>&1; then
-  echo "$(date -Is) FAILED build $NEW (site unchanged) — see /tmp/ict-staging-build.log" | tee "$STATUS"
+      && NEXT_DIST_DIR=.build npx next build" > $BASE/last-build.log 2>&1; then
+  echo "$(date -Is) FAILED build $NEW (site unchanged) — see $BASE/last-build.log" | tee "$STATUS"
   rm -rf "$REL"
   exit 1
 fi
