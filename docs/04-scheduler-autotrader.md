@@ -10,7 +10,11 @@ The autotrader runs a **cycle** that, on each invocation:
 
 1. **Activates pending trades** — promotes queued/pending AUTO setups to active open trades.
 2. **Evaluates open trades** — checks each OPEN demo trade against current live prices and resolves it to WIN / LOSS / closed when stop-loss or take-profit is hit.
-3. **Runs auto-entry** — for every user with `autoTradeEnabled = true`, scans current setups and, if a setup's confluence score ≥ that user's `autoTradeMinScore` (default 75), opens a new AUTO demo trade sized by the user's `riskPercent` and leverage settings.
+3. **Runs auto-entry** — for every user with `autoTradeEnabled = true`, scans current setups and, if a setup's confluence score ≥ that user's `autoTradeMinScore` (default 70), opens a new AUTO demo trade sized by the user's `riskPercent` and leverage settings.
+
+4. **Generates setup alerts** — `runAlertScan()` in `lib/alerts.ts` (see docs/01 → Alerts) and emails them when enabled.
+
+Trades the bankroll can only cover at under 25% of the intended 1%-risk size are skipped rather than opened as dust positions.
 
 The cycle logic lives in **`lib/autotrade.ts`** and is exposed through the API route **`app/api/demo/autotrade/route.ts`**.
 
@@ -51,15 +55,15 @@ To guarantee the cycle still runs if the platform task is unavailable (a 6-hour 
 
 | File | Role |
 |---|---|
-| `deploy/ict-autotrade-local.sh` | Wrapper: curls `http://localhost:3456/api/demo/autotrade` with the secret, pipes output to `process_autotrade.py`. |
-| `deploy/ict-autotrade-local.service` | `oneshot` service that runs the wrapper. |
-| `deploy/ict-autotrade-local.timer` | Fires hourly at minute :49, `Persistent=true` so missed runs fire on boot. |
+| `deploy/ict-autotrade-local.sh` | Wrapper: reads `AUTOTRADE_SECRET` / `APP_PORT` from the app's `.env`, POSTs to the local autotrade endpoint, logs a one-line summary, exits non-zero on failure. Self-contained (no external helper script). |
+| `deploy/ict-autotrade-local.service` | `oneshot` service that runs the wrapper. Replace `__RUN_USER__` / `__PROJECT_DIR__`. |
+| `deploy/ict-autotrade-local.timer` | Fires at :19 and :49 every hour (every 30 min), `Persistent=true` so missed runs fire on boot. |
 
-Staggering the local timer (:49) against the platform task (:19) means the cycle effectively runs about every 30 minutes with redundancy — if either mechanism fails, the other still fires within the hour.
+With the Abacus platform task gone, this timer is the scheduler.
 
 ### Install the local timer
 ```bash
-cd /home/ubuntu/ict_project/nextjs_space/deploy
+cd /path/to/ict-futures-platform/deploy   # replace __RUN_USER__ / __PROJECT_DIR__ in the .service first
 sudo cp ict-autotrade-local.service ict-autotrade-local.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now ict-autotrade-local.timer

@@ -11,7 +11,11 @@ export interface SessionUser {
 }
 
 /**
- * Returns the current logged-in user (from session), or null.
+ * Returns the current logged-in user, or null.
+ *
+ * The JWT only proves who the caller is; the role is always re-read from the
+ * database so that demoting an admin, or deleting a user, takes effect on the
+ * very next request instead of when the (30-day) session token expires.
  * Also lazily promotes the owner email to ADMIN if needed.
  */
 export async function getSessionUser(): Promise<SessionUser | null> {
@@ -19,19 +23,23 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const u = session?.user as any;
   if (!u?.id) return null;
 
-  let role: string = u.role ?? 'USER';
+  const dbUser = await prisma.user.findUnique({
+    where: { id: u.id },
+    select: { id: true, email: true, name: true, role: true },
+  });
+  if (!dbUser) return null; // account deleted — treat the session as invalid
 
-  // Lazy owner promotion safety-net (in case JWT was minted before promotion).
-  if (u.email && u.email.toLowerCase() === OWNER_EMAIL.toLowerCase() && role !== 'ADMIN') {
+  let role = dbUser.role ?? 'USER';
+  if (dbUser.email.toLowerCase() === OWNER_EMAIL.toLowerCase() && role !== 'ADMIN') {
     try {
-      await prisma.user.update({ where: { id: u.id }, data: { role: 'ADMIN' } });
+      await prisma.user.update({ where: { id: dbUser.id }, data: { role: 'ADMIN' } });
       role = 'ADMIN';
     } catch {
       /* ignore */
     }
   }
 
-  return { id: u.id, email: u.email, name: u.name, role };
+  return { id: dbUser.id, email: dbUser.email, name: dbUser.name, role };
 }
 
 /**

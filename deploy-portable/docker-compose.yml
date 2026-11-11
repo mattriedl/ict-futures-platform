@@ -1,6 +1,6 @@
 # ICT Futures Trading Platform — portable Docker Compose stack (app + PostgreSQL 16).
 #
-# Run from the project root (nextjs_space/):
+# Run from the project root (the repository root):
 #   cp deploy-portable/.env.example .env      # then edit .env
 #   docker compose -f deploy-portable/docker-compose.yml up -d --build
 #

@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { getSetupStats } from '@/lib/setup-stats';
+import { requireUser } from '@/lib/authz';
 
 /**
  * Read-only learning-store analytics: hit-rate statistics computed from resolved
@@ -9,6 +10,8 @@ import { getSetupStats } from '@/lib/setup-stats';
  * confluence tags by win-rate with sample sizes).
  */
 export async function GET() {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
   try {
     const stats = await getSetupStats();
     return NextResponse.json({ stats });

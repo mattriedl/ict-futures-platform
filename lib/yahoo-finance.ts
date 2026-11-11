@@ -16,58 +16,6 @@ const TIMEFRAME_MAP: Record<string, { interval: string; range: string }> = {
   '1d':  { interval: '1d',  range: '1y'  },
 };
 
-// Base prices for synthetic fallback data
-const SYMBOL_BASE_PRICES: Record<string, number> = {
-  'ES=F':  5200,
-  'NQ=F':  18500,
-  'YM=F':  39000,
-  'RTY=F': 2050,
-  'CL=F':  78,
-  'NG=F':  2.5,
-  'GC=F':  2350,
-  'SI=F':  28,
-  'ZB=F':  115,
-  'ZN=F':  109,
-  'ZC=F':  450,
-  'ZS=F':  1200,
-  'BTC=F': 68000,
-  'MES=F': 5200,
-  'MNQ=F': 18500,
-};
-
-function generateSyntheticBars(symbol: string, timeframe: string, count: number = 200): OHLCVBar[] {
-  const base = SYMBOL_BASE_PRICES[symbol] ?? 1000;
-  const volatility = base * 0.001; // 0.1% per bar
-  const bars: OHLCVBar[] = [];
-
-  const intervalMs: Record<string, number> = {
-    '1m':  60_000,
-    '5m':  300_000,
-    '15m': 900_000,
-    '1h':  3_600_000,
-    '4h':  14_400_000,
-    '1d':  86_400_000,
-  };
-  const barMs = intervalMs[timeframe] ?? intervalMs['15m'];
-  const now = Date.now();
-  let price = base;
-
-  for (let i = count; i >= 0; i--) {
-    const ts = now - i * barMs;
-    const open = price;
-    const change = (Math.random() - 0.49) * volatility * 2;
-    const close = open + change;
-    const high = Math.max(open, close) + Math.random() * volatility;
-    const low  = Math.min(open, close) - Math.random() * volatility;
-    const volume = Math.floor(10000 + Math.random() * 50000);
-
-    bars.push({ timestamp: ts, open, high, low, close, volume });
-    price = close;
-  }
-
-  return bars;
-}
-
 async function fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
@@ -88,16 +36,18 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3): P
 
 export interface MarketDataResult {
   bars: OHLCVBar[];
-  synthetic: boolean; // true whenever ANY synthetic fallback was used
+  /**
+   * Kept for API compatibility. The platform NEVER fabricates bars any more, so
+   * this is always false; a failed fetch returns an empty `bars` array instead.
+   */
+  synthetic: boolean;
   source: string;     // provenance of the bars, e.g. 'yahoo'
 }
 
 /**
- * Like fetchYahooFinanceData but also reports whether synthetic (fake) bars were
- * used. `synthetic` is true if the fetch failed OR too few real bars came back
- * and we fell back to generateSyntheticBars. Callers that require REAL data only
- * (e.g. the demo-trade resolver) must check this flag and refuse to act on
- * synthetic bars.
+ * Fetch recent candles from Yahoo Finance. REAL DATA ONLY: if the request fails
+ * or returns too little data, `bars` is empty and callers must show a
+ * "market data unavailable" state rather than invent prices.
  */
 export async function fetchYahooFinanceDataWithMeta(
   symbol: string,
@@ -107,7 +57,7 @@ export async function fetchYahooFinanceDataWithMeta(
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${tf.interval}&range=${tf.range}&includePrePost=true&corsDomain=finance.yahoo.com`;
 
   let bars: OHLCVBar[] = [];
-  let synthetic = false;
+  const synthetic = false;
 
   try {
     const res = await fetchWithRetry(url, {
@@ -144,16 +94,13 @@ export async function fetchYahooFinanceDataWithMeta(
       }
     }
   } catch (err: any) {
-    console.warn(`Yahoo Finance fetch failed for ${symbol}, using synthetic data:`, err?.message);
-    bars = generateSyntheticBars(symbol, timeframe);
-    synthetic = true;
+    console.warn(`Yahoo Finance fetch failed for ${symbol}:`, err?.message);
+    bars = [];
   }
 
-  // If we got back empty data, fall back to synthetic
   if (bars.length < 10) {
-    console.warn(`Insufficient data for ${symbol} (${bars.length} bars), using synthetic data`);
-    bars = generateSyntheticBars(symbol, timeframe);
-    synthetic = true;
+    if (bars.length > 0) console.warn(`Insufficient data for ${symbol} (${bars.length} bars)`);
+    bars = [];
   }
 
   // For 4h, aggregate 1h bars into 4h
@@ -176,19 +123,27 @@ export async function fetchYahooFinanceData(
 }
 
 function aggregate4H(bars: OHLCVBar[]): OHLCVBar[] {
+  // Group 1h bars into 4h buckets aligned to UTC 00/04/08/12/16/20 — grouping
+  // every 4 rows drifts out of alignment whenever the feed skips an hour
+  // (weekends, maintenance breaks, missing prints).
+  const FOUR_H = 4 * 3_600_000;
   const result: OHLCVBar[] = [];
-  for (let i = 0; i < bars.length; i += 4) {
-    const slice = bars.slice(i, i + 4);
-    if (slice.length === 0) continue;
-    result.push({
-      timestamp: slice[0]?.timestamp ?? 0,
-      open:      slice[0]?.open  ?? 0,
-      high:      Math.max(...slice.map((b: OHLCVBar) => b?.high ?? 0)),
-      low:       Math.min(...slice.map((b: OHLCVBar) => b?.low  ?? Infinity)),
-      close:     slice[slice.length - 1]?.close ?? 0,
-      volume:    slice.reduce((sum: number, b: OHLCVBar) => sum + (b?.volume ?? 0), 0),
-    });
+  let cur: OHLCVBar | null = null;
+  let curBucket = -1;
+  for (const b of bars) {
+    const bucket = Math.floor(b.timestamp / FOUR_H) * FOUR_H;
+    if (!cur || bucket !== curBucket) {
+      if (cur) result.push(cur);
+      cur = { timestamp: bucket, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 };
+      curBucket = bucket;
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume += b.volume ?? 0;
+    }
   }
+  if (cur) result.push(cur);
   return result;
 }
 
@@ -203,30 +158,31 @@ export interface SessionInfo {
   etMinute: number;
 }
 
-export function getSessionInfo(): SessionInfo {
-  const now = new Date();
-  const etStr = now.toLocaleString('en-US', {
+export function getSessionInfo(at: Date | number = Date.now()): SessionInfo {
+  const date = typeof at === 'number' ? new Date(at) : at;
+  // formatToParts + hourCycle h23 avoids the "24:05" midnight quirk some ICU
+  // builds produce with hour12:false.
+  const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
     hour: 'numeric',
     minute: 'numeric',
-    hour12: false,
-  });
-
-  const [hourStr, minuteStr] = etStr.split(':');
-  const etHour   = parseInt(hourStr ?? '0', 10);
-  const etMinute = parseInt(minuteStr ?? '0', 10);
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const etHour   = parseInt(parts.find((p) => p.type === 'hour')?.value ?? '0', 10) % 24;
+  const etMinute = parseInt(parts.find((p) => p.type === 'minute')?.value ?? '0', 10);
   const etTime   = etHour + etMinute / 60; // fractional hours
 
   let session = 'After Hours';
   let killZone: string | null = null;
 
-  // ICT Kill Zones (ET)
-  if (etTime >= 2 && etTime < 5) {
-    session  = 'London Session';
-    killZone = 'London Open Kill Zone (2-5 AM ET)';
-  } else if (etTime >= 3 && etTime < 4) {
+  // ICT Kill Zones (ET). Narrower Silver Bullet windows are checked BEFORE the
+  // broader kill zones that contain them, otherwise they can never match.
+  if (etTime >= 3 && etTime < 4) {
     session  = 'London Session';
     killZone = 'London Silver Bullet (3-4 AM ET)';
+  } else if (etTime >= 2 && etTime < 5) {
+    session  = 'London Session';
+    killZone = 'London Open Kill Zone (2-5 AM ET)';
   } else if (etTime >= 5 && etTime < 7) {
     session  = 'London Session';
   } else if (etTime >= 7 && etTime < 10) {
@@ -240,15 +196,15 @@ export function getSessionInfo(): SessionInfo {
     killZone = 'London Close Kill Zone (10 AM-12 PM ET)';
   } else if (etTime >= 12 && etTime < 13.5) {
     session  = 'New York Session';
-  } else if (etTime >= 13.5 && etTime < 16) {
-    session  = 'New York Session';
-    killZone = 'NY PM Kill Zone (1:30-4 PM ET)';
   } else if (etTime >= 14 && etTime < 15) {
     session  = 'New York Session';
     killZone = 'PM Silver Bullet (2-3 PM ET)';
+  } else if (etTime >= 13.5 && etTime < 16) {
+    session  = 'New York Session';
+    killZone = 'NY PM Kill Zone (1:30-4 PM ET)';
   } else if (etTime >= 16 && etTime < 20) {
     session  = 'After Hours';
-  } else if (etTime >= 20 || etTime < 2) {
+  } else {
     session  = 'Asia Session';
   }
 
@@ -280,7 +236,7 @@ export interface HistoricalResult {
 
 /**
  * Fetch historical candles for a symbol over the last `days` days at the given
- * timeframe, using Yahoo period1/period2. Falls back to synthetic bars on error.
+ * timeframe, using Yahoo period1/period2. Returns no bars (never fake ones) on error.
  */
 export async function fetchHistoricalData(
   symbol: string,
@@ -299,7 +255,7 @@ export async function fetchHistoricalData(
   )}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=false`;
 
   let bars: OHLCVBar[] = [];
-  let synthetic = false;
+  const synthetic = false;
 
   try {
     const res = await fetchWithRetry(url, {
@@ -333,16 +289,11 @@ export async function fetchHistoricalData(
       }
     }
   } catch (err) {
-    console.warn(`Historical fetch failed for ${symbol}, using synthetic:`, (err as Error).message);
+    console.warn(`Historical fetch failed for ${symbol}:`, (err as Error).message);
   }
 
-  if (bars.length < 30) {
-    // Approximate bar count for the window so synthetic backtests are meaningful.
-    const barsPerDay: Record<string, number> = { '1m': 1440, '5m': 288, '15m': 96, '1h': 24, '4h': 6, '1d': 1 };
-    const count = Math.min((barsPerDay[timeframe] ?? 96) * clampedDays, 5000);
-    bars = generateSyntheticBars(symbol, timeframe, count);
-    synthetic = true;
-  }
+  // REAL DATA ONLY: too little history means the backtest cannot run.
+  if (bars.length < 30) bars = [];
 
   if (timeframe === '4h') {
     bars = aggregate4H(bars);

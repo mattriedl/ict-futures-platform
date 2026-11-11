@@ -4,16 +4,28 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { activatePendingTrades, runAutoTrade } from '@/lib/autotrade';
 import { evaluateOpenTrades } from '@/lib/demo-trades';
+import { runAlertScan } from '@/lib/alerts';
+import { timingSafeEqual } from 'crypto';
+
+function safeEqual(a: string | null, b: string): boolean {
+  if (!a) return false;
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
 
 function authorized(request: NextRequest): boolean {
   const secret = process.env.AUTOTRADE_SECRET;
   if (!secret) return false;
   const header = request.headers.get('x-autotrade-secret');
   const query = request.nextUrl.searchParams.get('secret');
-  return header === secret || query === secret;
+  return safeEqual(header, secret) || safeEqual(query, secret);
 }
 
-// POST: run one full autotrader cycle (activate pending -> resolve open -> scan & place).
+// A full cycle scans every active instrument; allow it time to finish.
+export const maxDuration = 300;
+
+// POST: run one full scheduled cycle (activate pending -> resolve open -> scan & place -> setup alerts).
 export async function POST(request: NextRequest) {
   if (!authorized(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -57,8 +69,15 @@ export async function POST(request: NextRequest) {
     errors.push({ phase: 'enumerate-users', message: (e as Error)?.message });
   }
 
+  let alerts: Awaited<ReturnType<typeof runAlertScan>> | null = null;
+  try {
+    alerts = await runAlertScan();
+  } catch (e) {
+    errors.push({ phase: 'alerts', message: (e as Error)?.message });
+  }
+
   return NextResponse.json(
-    { ok: true, ranAt, activated, cancelled, resolved, perUser, errors },
+    { ok: true, ranAt, activated, cancelled, resolved, perUser, alerts, errors },
     { status: 200 },
   );
 }

@@ -105,6 +105,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const userId = (session.user as any)?.id;
     const body = await request.json();
     const { id, status, read: isRead } = body ?? {};
 
@@ -113,13 +114,20 @@ export async function PATCH(request: NextRequest) {
     }
 
     const updateData: any = {};
-    if (status !== undefined) updateData.status = status;
-    if (isRead !== undefined) updateData.read = isRead;
+    if (status !== undefined) {
+      if (!['ACTIVE', 'DISMISSED'].includes(status)) {
+        return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
+      }
+      updateData.status = status;
+    }
+    if (isRead !== undefined) updateData.read = Boolean(isRead);
 
-    const alert = await prisma.alert.update({
-      where: { id },
-      data: updateData,
-    });
+    // Scope the update to the caller's own alerts.
+    const res = await prisma.alert.updateMany({ where: { id, userId }, data: updateData });
+    if (res.count !== 1) {
+      return NextResponse.json({ error: 'Alert not found' }, { status: 404 });
+    }
+    const alert = await prisma.alert.findUnique({ where: { id } });
 
     return NextResponse.json({ alert });
   } catch (error: any) {

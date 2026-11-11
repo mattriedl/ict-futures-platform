@@ -31,8 +31,37 @@ Each detector is its own module in `lib/ict-engine/`:
 | Function | Role |
 |---|---|
 | `analyzeICT()` | Runs all detectors over a candle series and returns the detected patterns. |
-| `scoreConfluence()` | Combines detected patterns into a single **confluence score** (higher = more aligned confirmation). This score drives alerts (`alertMinScore`) and autotrade entry (`autoTradeMinScore`). |
-| `generateTradeSetup()` | Produces a concrete setup from the confluence: entry, stop-loss, take-profit (and thus R:R). |
+| `scoreConfluence()` | ICT confluence score 0–100 and trade direction (`lib/ict-engine/ict-score.ts`, see §2a). Drives alerts (`alertMinScore`, default 50) and autotrade entry (`autoTradeMinScore`, default 70). |
+| `generateTradeSetup()` | Produces a concrete setup from the confluence: entry, stop-loss (entry ∓ 1.5×ATR), take-profit (entry ± 3×ATR, extended to the nearest EQH/EQL or PDH/PDL). The entry anchors to the **most recent** zone (priority Silver Bullet → OTE → Order Block → FVG → Mitigation) that is on the correct side of price, within 3×ATR, and not broken by a later close; otherwise it uses the market price. |
+
+### 2a. How the ICT score works
+
+- **Direction** comes from higher-timeframe structure: the chart's candles are aggregated (15m → 4h, 1h/4h → daily, daily → weekly), and the HTF swing structure sets bullish/bearish. If it's mixed, there's no setup.
+- **Context** levels can be days old but count only while still in play. Zones (order blocks, FVGs, breakers…) count until a candle closes through them. Liquidity (equal highs/lows, previous day/week levels) counts until price trades through it.
+- **Trigger** patterns must be recent (current session: 8h on ≤15m charts, 24h on 1h, 4 days on 4h) and in the bias direction. The latest recent structure break must agree with the bias.
+
+| Factor | Points |
+|---|---|
+| HTF bias + price in discount (long) / premium (short) of the HTF range | 10 |
+| Unswept liquidity target ahead | 10 |
+| Intact zone at price (with bias) | 5 |
+| Recent liquidity sweep | 15 |
+| Recent displacement | 5 |
+| Recent market structure shift (latest break agrees with bias) | 15 |
+| Fresh, intact entry array (FVG / OB / OTE / Silver Bullet) | 15 |
+| Sequence: sweep → shift → entry, in that order | 10 |
+| Kill Zone active (at the scored bar's time) | 8 |
+| Silver Bullet / Power of 3 in bias direction | 7 |
+
+**Calibration (Nov 2026).** Backtests on ES, NQ, CL, GC, EURUSD, GBPJPY (15m, 45 days) and BTC, ETH (1h, 50 days), with no score filter:
+
+| | Trades | Win % | Avg R |
+|---|---|---|---|
+| Old scoring, all setups (nearly all scored 60–79; score didn't predict outcome) | 847 | 37.5 | −0.09 |
+| New scoring, score ≥ 50 | 313 | 43.1 | +0.04 |
+| New scoring, score ≥ 70 | 85 | 47.1 | +0.14 |
+
+Hence the defaults alertMinScore = 50 and autoTradeMinScore = 70. Samples are small (≈600 trades) and results vary by market (GBPJPY was weak throughout). Treat this as "the score now ranks setups sensibly", not as a proven edge. Re-run `scripts/score-calibration.ts` (command in its header) after any scoring change.
 
 To tune behavior, adjust detector thresholds inside the individual modules or the weighting inside `scoreConfluence()`. After changing scoring, re-run `scripts/verify-calcs.ts` and backtests, and (per project rules) test in a feature branch before merging to `main`.
 
@@ -59,6 +88,7 @@ Defined in `lib/margin.ts` and applied in `lib/demo-trades.ts`.
   - Forex: **30×** (`leverageForex`)
   - Futures: **10×** (`leverageFutures`)
 - **Risk sizing:** position size is derived from the user's `riskPercent` of account balance against the stop distance.
+- **FX in USD:** an FX contract is one micro lot (1,000 base units), so a 1.00 move is worth 1,000 of the *quote* currency. At entry, `resolveTradePointValue()` (`lib/fx.ts`) converts that to USD with a live rate: quote USD → ×1; base USD (USDJPY) → ×1/price; crosses (EURGBP, GBPJPY) → via the quote currency's USD pair. The result is stored on the trade (`DemoTrade.pointValue`) and used for sizing, margin and P&L for the trade's lifetime. If no live rate is available the trade is refused. Trades opened before Nov 2026 have no stored value and use the instrument's configured one.
 
 ---
 
@@ -78,7 +108,7 @@ Use `scripts/verify-calcs.ts` to validate these formulas against stored trades a
 
 ## 6. Backtesting
 
-`lib/backtest.ts` replays historical candles through `analyzeICT()` / `scoreConfluence()` / `generateTradeSetup()` and simulates trade outcomes using the same margin/PnL math, writing results to `BacktestRun`. Exposed via `/api/backtest` and the Backtest page. Gated by `AppSettings.backtestingEnabled`.
+`lib/backtest.ts` replays historical candles through `analyzeICT()` / `scoreConfluence()` / `generateTradeSetup()` on a rolling 400-bar window (like live analysis). It fills at the signal bar's **close** using the autotrader's freshness rules, scores Kill Zones at the bar's own time, and resolves TP/SL on later bars only. Max drawdown is measured on an account risking `riskPerTrade`% per trade. Results go to `BacktestRun`. It refuses to run without enough real history. Exposed via `/api/backtest` and the Backtest page. Gated by `AppSettings.backtestingEnabled`.
 
 ---
 
@@ -87,9 +117,9 @@ Use `scripts/verify-calcs.ts` to validate these formulas against stored trades a
 | To change… | Edit… |
 |---|---|
 | Detection sensitivity | the relevant `lib/ict-engine/<detector>.ts` |
-| How confluence is scored/weighted | `scoreConfluence()` in `lib/ict-engine/index.ts` |
+| How confluence is scored/weighted | `scoreIct()` in `lib/ict-engine/ict-score.ts` |
 | Entry/stop/target logic | `generateTradeSetup()` in `lib/ict-engine/index.ts` |
 | Margin/leverage model | `lib/margin.ts` + `UserSettings` leverage fields |
 | PnL/outcome math | `lib/demo-trades.ts` |
 | Data sources / feeds | `lib/market-data.ts`, `lib/live-quote.ts`, `lib/crypto-feed.ts` |
-| Autotrade entry threshold | per-user `autoTradeMinScore` (default 75) |
+| Autotrade entry threshold | per-user `autoTradeMinScore` (default 70) |

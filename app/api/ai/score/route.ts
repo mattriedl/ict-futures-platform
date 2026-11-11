@@ -2,8 +2,11 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireUser } from '@/lib/authz';
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
   try {
     const body = await request.json();
     const { symbol, patterns, confluenceScore, direction, timeframe } = body ?? {};

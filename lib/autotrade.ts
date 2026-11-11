@@ -30,13 +30,16 @@ import { fetchMarketData } from '@/lib/market-data';
 import { analyzeICT, scoreConfluence, generateTradeSetup } from '@/lib/ict-engine';
 import { deriveAssetClass, biasToDirection, computeWeightedScore } from '@/lib/setup-stats';
 import { fetchLiveQuote } from '@/lib/live-quote';
-import { getPointValue } from '@/lib/instruments';
+import { resolveTradePointValue } from '@/lib/fx';
 import { getLeverageForSymbol, computeRequiredMargin } from '@/lib/margin';
 import { getOrCreateDemoAccount, getDrawdownStatus } from '@/lib/demo-trades';
 
 // Legacy pending orders self-cancel quickly if their entry is never reached so
 // stale, expired-analysis limit orders don't linger (new orders open at market).
 export const AUTOTRADE_PENDING_TTL_MS = 2 * 60 * 60 * 1000; // 2h
+
+// Minimum fraction of the 1%-risk size a bankroll-capped trade must keep.
+const MIN_SIZE_FRACTION = 0.25;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -110,7 +113,7 @@ export async function activatePendingTrades(
         trade.entryPrice,
         trade.positionSize,
         leverage,
-        (trade as any).instrument?.pointValue,
+        trade.pointValue ?? (trade as any).instrument?.pointValue,
       );
 
       const account = await getOrCreateDemoAccount(trade.userId);
@@ -152,7 +155,7 @@ export async function runAutoTrade(
     return { created: 0, scanned: 0, skipped: 0, details: [{ note: 'autoTradeEnabled=false' }], diagnostics: [] };
   }
 
-  const minScore = settings.autoTradeMinScore ?? 75;
+  const minScore = settings.autoTradeMinScore ?? 70;
   const riskPercent = settings.riskPercent ?? 1;
   const timeframe = '15m';
 
@@ -275,7 +278,13 @@ export async function runAutoTrade(
       const entry = round4(live);
 
       // --- Sizing: 1%-risk rule (same formula as manual trade route) ---------
-      const pointValue = getPointValue(symbol, instrument.pointValue);
+      // USD value per 1.00 move, fixed at entry (FX converted via live rates).
+      const pointValue = await resolveTradePointValue(symbol, entry, instrument.pointValue);
+      if (pointValue == null) {
+        skipped++;
+        diagnostics.push({ symbol, weightedScore: Math.round(score), reason: 'no-fx-rate' });
+        continue;
+      }
       const perUnitRisk = Math.abs(entry - stop) * pointValue;
       if (perUnitRisk <= 0) { skipped++; continue; }
       const riskAmount = account.currentBalance * (riskPercent / 100);
@@ -284,11 +293,18 @@ export async function runAutoTrade(
 
       // --- No-over-bankroll cap ---------------------------------------------
       const leverage = getLeverageForSymbol(symbol, settings);
-      let requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, instrument.pointValue);
+      let requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, pointValue);
       if (requiredMargin > availableBalance) {
         const scale = (availableBalance / requiredMargin) * 0.99;
+        // If the bankroll only covers a sliver of the intended risk, skip the
+        // trade instead of opening a meaningless dust position.
+        if (scale < MIN_SIZE_FRACTION) {
+          skipped++;
+          diagnostics.push({ symbol, weightedScore: Math.round(score), reason: 'insufficient-bankroll' });
+          continue;
+        }
         positionSize = round4(positionSize * scale);
-        requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, instrument.pointValue);
+        requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, pointValue);
       }
       if (positionSize <= 0 || requiredMargin > availableBalance + 1e-6) { skipped++; diagnostics.push({ symbol, weightedScore: Math.round(score), reason: 'insufficient-bankroll' }); continue; }
 
@@ -320,6 +336,7 @@ export async function runAutoTrade(
           stopLoss: stop,
           takeProfit: tp,
           positionSize,
+          pointValue,
           margin: round2(requiredMargin),
           riskReward: setup.riskReward,
           aiScore: score,

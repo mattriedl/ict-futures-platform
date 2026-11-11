@@ -28,6 +28,8 @@ export interface PnlResult {
 
 /**
  * Compute realized P&L for a trade given an exit price.
+ * Pass the trade's stored `pointValue` (USD per 1.00 move, fixed at entry) when
+ * it has one; older trades fall back to the instrument's configured value.
  * LONG:  profit when exit > entry.  SHORT: profit when exit < entry.
  * rMultiple = price move in favor / initial risk (entry->stop distance).
  */
@@ -167,7 +169,7 @@ export async function evaluateOpenTrades(userId?: string): Promise<number> {
         const pnlRes = computeTradePnl(
           trade,
           resolution.exitPrice,
-          (trade as any).instrument?.pointValue,
+          trade.pointValue ?? (trade as any).instrument?.pointValue,
         );
         // Atomically flip the trade OPEN -> WIN/LOSS and credit the balance.
         // The status='OPEN' guard makes this safe against concurrent evaluations
@@ -234,6 +236,31 @@ export async function evaluateOpenTrades(userId?: string): Promise<number> {
   }
 
   return resolvedCount;
+}
+
+// ---------------------------------------------------------------------------
+// Page-load evaluation, de-duplicated.
+// The journal loads trades, account and stats in parallel, and each used to run
+// a full evaluation (one market-data fetch per open symbol). Requests for the
+// same user now share one in-flight evaluation, and a user isn't re-evaluated
+// more than once per USER_EVAL_MIN_INTERVAL_MS. The scheduled cycle still calls
+// evaluateOpenTrades() directly.
+// ---------------------------------------------------------------------------
+const USER_EVAL_MIN_INTERVAL_MS = 30_000;
+const userEvalInFlight = new Map<string, Promise<number>>();
+const userEvalLastRun = new Map<string, number>();
+
+export function evaluateOpenTradesForUser(userId: string): Promise<number> {
+  const inflight = userEvalInFlight.get(userId);
+  if (inflight) return inflight;
+  const last = userEvalLastRun.get(userId) ?? 0;
+  if (Date.now() - last < USER_EVAL_MIN_INTERVAL_MS) return Promise.resolve(0);
+  const p = evaluateOpenTrades(userId).finally(() => {
+    userEvalLastRun.set(userId, Date.now());
+    userEvalInFlight.delete(userId);
+  });
+  userEvalInFlight.set(userId, p);
+  return p;
 }
 
 /**
@@ -367,7 +394,7 @@ export async function getUnrealizedPnl(trade: DemoTrade): Promise<number> {
     const bars = await fetchMarketData(trade.symbol, trade.timeframe);
     const price = getCurrentPrice(bars);
     if (!price) return 0;
-    return computeTradePnl(trade, price, (trade as any).instrument?.pointValue).pnl;
+    return computeTradePnl(trade, price, trade.pointValue ?? (trade as any).instrument?.pointValue).pnl;
   } catch {
     return 0;
   }

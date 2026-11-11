@@ -31,6 +31,8 @@ export interface SimulatedTrade {
   // Volume-based liquidity APPROXIMATION (historical depth unavailable).
   liquidityParticipationPercent: number | null;
   liquidityRating: 'AMPLE' | 'MODERATE' | 'THIN' | null;
+  /** Scoring factors that were met when the trade was taken. */
+  factorsMet?: string[];
 }
 
 export interface BacktestResult {
@@ -65,11 +67,19 @@ export interface BacktestResult {
 const WARMUP_BARS = 60;       // bars needed before the engine produces signals
 const MAX_HOLD_BARS = 60;     // resolve/abandon a trade after this many bars
 const COOLDOWN_BARS = 3;      // bars to wait after a trade before taking a new one
+// The live analyzer sees roughly the last 300-500 candles (OKX returns 300,
+// Yahoo 5 days of 15m). Replaying on a rolling window of the same size keeps
+// backtest signals comparable with live ones and keeps runtime linear instead
+// of re-scanning the entire history at every bar.
+const ANALYSIS_WINDOW_BARS = 400;
+
+export class BacktestDataError extends Error {}
 
 /**
  * Walk-forward backtest. At each bar i (>= WARMUP_BARS) we run the ICT engine on
- * the window bars[0..i] (NO future data — avoids look-ahead bias for signals).
- * If a qualifying setup appears we open a trade at that bar's close and then use
+ * a rolling window ending at bar i (NO future data — avoids look-ahead bias).
+ * If a qualifying, still-fresh setup appears we open a trade at that bar's close
+ * (same freshness rules as the live autotrader) and then use
  * ONLY future bars (i+1..) to resolve TP/SL. This cleanly separates the signal
  * (past only) from the resolution (future only).
  */
@@ -78,6 +88,12 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
   const intendedSizeUsd = config.intendedSizeUsd && config.intendedSizeUsd > 0 ? config.intendedSizeUsd : 10000;
 
   const { bars, synthetic, clampedDays } = await fetchMarketHistorical(symbol, timeframe, days);
+  // REAL DATA ONLY: never backtest on fabricated or missing history.
+  if (synthetic || bars.length <= WARMUP_BARS + 1) {
+    throw new BacktestDataError(
+      `Not enough real historical data for ${symbol} on ${timeframe} (${bars.length} bars). The data source may be unavailable — try again later or pick a different timeframe.`,
+    );
+  }
 
   const trades: SimulatedTrade[] = [];
   let i = WARMUP_BARS;
@@ -90,16 +106,18 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
     }
 
     // Signal generation: only bars up to and including i.
-    const window = bars.slice(0, i + 1);
+    const window = bars.slice(Math.max(0, i + 1 - ANALYSIS_WINDOW_BARS), i + 1);
+    const at = bars[i].timestamp;
     const patterns = analyzeICT(window);
-    const score = scoreConfluence(patterns).score;
+    const scored = scoreConfluence(patterns, window, at);
+    const score = scored.score;
 
     if (score < minAiScore) {
       i++;
       continue;
     }
 
-    const setup = generateTradeSetup(window, patterns);
+    const setup = generateTradeSetup(window, patterns, at);
     if (!setup) {
       i++;
       continue;
@@ -116,13 +134,22 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
     }
 
     const direction: 'LONG' | 'SHORT' = setup.direction === 'BULLISH' ? 'LONG' : 'SHORT';
-    const entry = setup.entryPrice;
     const stop = setup.stopLoss;
     const target = setup.takeProfit;
 
-    // Skip degenerate setups.
+    // Fill at this bar's CLOSE, the price actually available when the signal
+    // fires, using the same freshness rules as the live autotrader: price must
+    // sit between stop and target on the target side of the setup entry, with
+    // at least 1:1 reward:risk remaining. Filling at the setup's limit level
+    // (which price may never revisit) overstated results.
+    const entry = bars[i].close;
+    const fresh =
+      direction === 'LONG'
+        ? entry >= setup.entryPrice && entry < target && stop < entry
+        : entry <= setup.entryPrice && entry > target && stop > entry;
     const risk = Math.abs(entry - stop);
-    if (risk <= 0) {
+    const rewardLeft = Math.abs(target - entry);
+    if (!fresh || risk <= 0 || rewardLeft < risk) {
       i++;
       continue;
     }
@@ -168,7 +195,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
       stopLoss: roundPrice(stop),
       takeProfit: roundPrice(target),
       exitPrice: exitPrice != null ? roundPrice(exitPrice) : null,
-      riskReward: setup.riskReward,
+      riskReward: round2(rewardLeft / risk),
       aiScore: setup.aiScore,
       confluences: setup.confluences,
       outcome,
@@ -176,6 +203,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
       pnlPercent: round2(pnlPercent),
       liquidityParticipationPercent: liqEst?.participationPercent ?? null,
       liquidityRating: liqEst?.rating ?? null,
+      factorsMet: scored.factors.filter((f) => f.met).map((f) => f.name.startsWith('HTF bias') ? 'HTF premium/discount' : f.name),
     });
 
     // Advance past the trade close + cooldown to avoid overlapping duplicates.
@@ -233,19 +261,25 @@ function summarize(
   // Equity curve in R units (each trade risks `riskPerTrade` R -> we track cumulative R).
   const equityCurve: { t: string; equity: number }[] = [];
   let cumR = 0;
-  let peak = 0;
-  let maxDrawdown = 0;
   const startEquity = bars[0] ? new Date(bars[0].timestamp).toISOString() : new Date().toISOString();
   equityCurve.push({ t: startEquity, equity: 0 });
+  // Max drawdown as a real percentage: simulate an account that risks
+  // `riskPerTrade` % of its balance per trade (1R = riskPerTrade %), compounding,
+  // and measure the largest peak-to-trough fall. (The old "drawdown R / peak R"
+  // ratio blew up to thousands of percent whenever the peak was small.)
+  const riskFrac = Math.max(0, (config.riskPerTrade ?? 1) / 100);
+  let balance = 1;
+  let peakBalance = 1;
+  let maxDdFrac = 0;
   for (const t of closed) {
     cumR += t.rMultiple;
     equityCurve.push({ t: t.closedAt ?? t.openedAt, equity: round2(cumR) });
-    if (cumR > peak) peak = cumR;
-    const dd = peak - cumR; // drawdown in R
-    if (dd > maxDrawdown) maxDrawdown = dd;
+    balance *= Math.max(0, 1 + t.rMultiple * riskFrac);
+    if (balance > peakBalance) peakBalance = balance;
+    const dd = peakBalance > 0 ? (peakBalance - balance) / peakBalance : 0;
+    if (dd > maxDdFrac) maxDdFrac = dd;
   }
-  // Express max drawdown as % of peak equity where meaningful, else raw R.
-  const maxDrawdownPercent = peak > 0 ? round2((maxDrawdown / peak) * 100) : round2(maxDrawdown);
+  const maxDrawdownPercent = round2(maxDdFrac * 100);
 
   // Volume-based liquidity approximation summary across all trades.
   const parts = trades

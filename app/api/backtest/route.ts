@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/authz';
-import { runBacktest } from '@/lib/backtest';
+import { runBacktest, BacktestDataError } from '@/lib/backtest';
 
 const configSchema = z.object({
   symbol: z.string().min(1),
@@ -63,6 +63,9 @@ export async function POST(request: NextRequest) {
   try {
     result = await runBacktest(config);
   } catch (e) {
+    if (e instanceof BacktestDataError) {
+      return NextResponse.json({ error: e.message }, { status: 422 });
+    }
     console.error('Backtest failed:', e);
     return NextResponse.json({ error: 'Backtest execution failed' }, { status: 500 });
   }

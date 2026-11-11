@@ -1,8 +1,8 @@
 [Unit]
-Description=Run ICT Autotrader local backstop every hour (mid-hour, offset from platform task)
+Description=Run the ICT Futures scheduled cycle every 30 minutes
 
 [Timer]
-OnCalendar=*-*-* *:49:00
+OnCalendar=*-*-* *:19,49:00
 Persistent=true
 
 [Install]

@@ -17,7 +17,7 @@ For the Docker setup, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` fe
 ## 2. Models (16)
 
 **Auth / NextAuth**
-- `User` — account, email, hashed password, role (Owner/Admin/User), status.
+- `User` — account, email, hashed password, `role` (`USER` | `ADMIN`). The owner email in `lib/auth.ts` (`OWNER_EMAIL`) is auto-promoted to `ADMIN` on login.
 - `Account`, `Session`, `VerificationToken` — NextAuth adapter tables.
 
 **Instruments & market data**
@@ -39,7 +39,7 @@ For the Docker setup, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` fe
 
 **Demo trading**
 - `DemoAccount` — per-user paper account (startingBalance/currentBalance, default 100000).
-- `DemoTrade` — individual paper trade: symbol, side, entry/exit price, position size, margin, `aiScore`, `source` (ONE_CLICK | MANUAL | AUTO), `status` (OPEN | WIN | LOSS | CLOSED_MANUAL), outcome, pnl, pnlPercent, rMultiple.
+- `DemoTrade` — individual paper trade: symbol, side, entry/exit price, position size, margin, `aiScore`, `source` (ONE_CLICK | MANUAL | AUTO), `status` (OPEN | WIN | LOSS | CLOSED_MANUAL, plus legacy PENDING | CANCELLED from the old limit-order autotrader), outcome, pnl, pnlPercent, rMultiple.
 
 **Backtesting**
 - `BacktestRun` — a backtest execution and its aggregate results.
@@ -47,6 +47,23 @@ For the Docker setup, `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` fe
 ---
 
 ## 3. Migrations
+
+Migration history:
+
+| Migration | Contents |
+|---|---|
+| `0_init` | Original schema as first generated. |
+| `20261107000000_sync_schema_with_app` | Catch-up: `SetupLog` table; `DemoTrade.margin/pendingApproach/expiresAt/dataSource`; `UserSettings` risk, drawdown, leverage and autotrade fields. All additive with defaults. |
+| `20261111000000_demotrade_point_value` | `DemoTrade.pointValue` (USD per 1.00 move, fixed at entry). Nullable, additive. |
+
+Before the catch-up migration existed, `prisma migrate deploy` on a fresh database produced an incomplete schema (the Abacus DB had been kept in sync with `prisma db push`). **If you are moving an existing database that already has these columns** (e.g. restoring an Abacus `pg_dump`), mark the catch-up migration as already applied instead of running it:
+
+```bash
+npx prisma migrate resolve --applied 20261107000000_sync_schema_with_app
+```
+
+Then verify there is no drift: `npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script` should print an empty migration.
+
 
 Prisma migrations live in `prisma/migrations/`.
 
@@ -71,10 +88,10 @@ npx prisma generate
 ## 4. Seeding
 
 ```bash
-npm run seed    # tsx --require dotenv/config scripts/safe-seed.ts
+npm run seed    # = npx prisma db seed -> safe-seed.ts -> seed.ts
 ```
 
-`safe-seed.ts` is idempotent/non-destructive (safe to run on an existing DB). Related scripts in `scripts/`:
+`safe-seed.ts` is idempotent/non-destructive (safe to run on an existing DB). It upserts all instruments from `lib/instruments.ts`. A test login is created **only** if `SEED_TEST_USER_EMAIL` and `SEED_TEST_USER_PASSWORD` are set. Related scripts in `scripts/`:
 - `seed.ts` — base seed.
 - `curate-crypto.ts` — curate crypto instrument list.
 - `backfill-margin.ts` — backfill margin on existing trades.

@@ -12,9 +12,9 @@ import { detectOpeningGaps }        from './opening-gaps';
 import { detectSilverBullet }       from './silver-bullet';
 import { detectPowerOfThree }       from './power-of-three';
 import { detectPreviousDayLevels }  from './previous-day-levels';
-import { getSessionInfo }           from '../yahoo-finance';
+import { scoreIct, type IctScore, type Bias } from './ict-score';
 
-export type { OHLCVBar, ICTPattern, TradeSetupResult, ConfluenceScore };
+export type { OHLCVBar, ICTPattern, TradeSetupResult, ConfluenceScore, IctScore, Bias };
 
 export function analyzeICT(bars: OHLCVBar[]): ICTPattern[] {
   if (!bars || bars.length === 0) return [];
@@ -39,46 +39,15 @@ export function analyzeICT(bars: OHLCVBar[]): ICTPattern[] {
   return allPatterns;
 }
 
-export function scoreConfluence(patterns: ICTPattern[]): ConfluenceScore {
-  const session    = getSessionInfo();
-  const isKillZone = session.killZone !== null;
-
-  const bullish = patterns.filter((p: ICTPattern) => p.direction === 'BULLISH');
-  const bearish = patterns.filter((p: ICTPattern) => p.direction === 'BEARISH');
-
-  const dominantDir = bullish.length >= bearish.length ? 'BULLISH' : 'BEARISH';
-  const dominant    = dominantDir === 'BULLISH' ? bullish : bearish;
-
-  const factors = [
-    // Core ICT concepts (original)
-    { name: 'Order Block Present',        weight: 12, met: dominant.some((p: ICTPattern) => p.type === 'ORDER_BLOCK') },
-    { name: 'Fair Value Gap',             weight: 10, met: dominant.some((p: ICTPattern) => p.type === 'FVG') },
-    { name: 'Liquidity Sweep',            weight: 12, met: dominant.some((p: ICTPattern) => p.type === 'LIQUIDITY_SWEEP') },
-    { name: 'Market Structure Shift/BOS', weight: 10, met: dominant.some((p: ICTPattern) => p.type === 'MSS_BOS') },
-    { name: 'OTE Zone',                   weight: 10, met: dominant.some((p: ICTPattern) => p.type === 'OTE') },
-    { name: 'Premium/Discount Alignment', weight: 5,  met: dominant.some((p: ICTPattern) => p.type === 'PREMIUM_DISCOUNT') },
-    { name: 'Breaker Block',              weight: 4,  met: dominant.some((p: ICTPattern) => p.type === 'BREAKER_BLOCK') },
-    { name: 'Mitigation Block',           weight: 3,  met: dominant.some((p: ICTPattern) => p.type === 'MITIGATION_BLOCK') },
-    // Kill Zone timing
-    { name: 'Kill Zone Active',           weight: 8,  met: isKillZone },
-    // Full ICT Suite additions
-    { name: 'Silver Bullet Setup',        weight: 10, met: dominant.some((p: ICTPattern) => p.type === 'SILVER_BULLET') },
-    { name: 'Displacement Present',       weight: 8,  met: dominant.some((p: ICTPattern) => p.type === 'DISPLACEMENT') },
-    { name: 'Equal Highs/Lows (EQH/EQL)',weight: 6,  met: patterns.some((p: ICTPattern) => p.type === 'EQ_HIGHS_LOWS') },
-    { name: 'PDH/PDL Confluence',         weight: 5,  met: patterns.some((p: ICTPattern) => p.type === 'PDH_PDL') },
-    { name: 'Opening Gap (NDOG/NWOG)',    weight: 3,  met: patterns.some((p: ICTPattern) => p.type === 'NDOG_NWOG') },
-    { name: 'Power of 3 (AMD) Alignment', weight: 7,  met: dominant.some((p: ICTPattern) => p.type === 'POWER_OF_THREE') },
-    // High-confidence bonuses
-    { name: 'Multi-Confluence (3+ types)',weight: 5,  met: new Set(dominant.map(p => p.type)).size >= 3 },
-    { name: 'High Avg Confidence (>75%)', weight: 3,  met: dominant.length > 0 && dominant.reduce((s, p) => s + p.confidence, 0) / dominant.length > 75 },
-  ];
-
-  // Raw score (max possible ≈ 121, normalize to 100)
-  const MAX_POSSIBLE = factors.reduce((s, f) => s + f.weight, 0);
-  const rawScore     = factors.reduce((sum: number, f: any) => sum + (f.met ? f.weight : 0), 0);
-  const score        = Math.round((rawScore / MAX_POSSIBLE) * 100);
-
-  return { score, factors };
+/**
+ * ICT confluence score for the current bar series (see ict-score.ts):
+ * direction from higher-timeframe structure, context levels only while still
+ * in play, trigger patterns only when recent and in sequence.
+ * @param at  Moment being scored (defaults to now). Backtests pass the
+ *            replayed bar's timestamp so Kill Zone timing is historical.
+ */
+export function scoreConfluence(patterns: ICTPattern[], bars: OHLCVBar[], at?: number): IctScore {
+  return scoreIct(patterns, bars, at);
 }
 
 // Round a price to a magnitude-appropriate precision. A fixed .toFixed(2)
@@ -98,31 +67,61 @@ function roundPrice(n: number): number {
   return parseFloat(n.toFixed(decimals));
 }
 
-export function generateTradeSetup(bars: OHLCVBar[], patterns: ICTPattern[]): TradeSetupResult | null {
+/**
+ * @param at  Moment the setup is evaluated (defaults to now). Backtests pass the
+ *            timestamp of the bar being replayed.
+ */
+export function generateTradeSetup(bars: OHLCVBar[], patterns: ICTPattern[], at?: number): TradeSetupResult | null {
   if (!bars || bars.length === 0 || !patterns || patterns.length === 0) return null;
 
   const lastBar = bars[bars.length - 1];
   if (!lastBar) return null;
   const price = lastBar?.close ?? 0;
 
-  const bullish  = patterns.filter((p: ICTPattern) => p.direction === 'BULLISH');
-  const bearish  = patterns.filter((p: ICTPattern) => p.direction === 'BEARISH');
-  const direction = bullish.length >= bearish.length ? 'BULLISH' : 'BEARISH';
-  const relevant  = direction === 'BULLISH' ? bullish : bearish;
-
-  const confluence = scoreConfluence(patterns);
-  if (confluence.score < 20) return null;
-
-  // Priority order for entry: Silver Bullet > OTE > OB > FVG > Mitigation > Breaker
-  const sb  = relevant.find((p: ICTPattern) => p.type === 'SILVER_BULLET');
-  const ote = relevant.find((p: ICTPattern) => p.type === 'OTE');
-  const ob  = relevant.find((p: ICTPattern) => p.type === 'ORDER_BLOCK');
-  const fvg = relevant.find((p: ICTPattern) => p.type === 'FVG');
-  const mit = relevant.find((p: ICTPattern) => p.type === 'MITIGATION_BLOCK');
+  // Direction comes from higher-timeframe structure, not a pattern count.
+  const confluence = scoreConfluence(patterns, bars, at);
+  if (confluence.bias === 'NEUTRAL' || confluence.score < 20) return null;
+  const direction: 'BULLISH' | 'BEARISH' = confluence.bias;
+  const relevant  = patterns.filter((p: ICTPattern) => p.direction === direction);
 
   // Calculate ATR (14-bar)
   const atrBars = bars.slice(-14);
   const atr     = atrBars.reduce((sum: number, b: OHLCVBar) => sum + ((b?.high ?? 0) - (b?.low ?? 0)), 0) / (atrBars.length || 1);
+
+  // Entry zone selection. Detectors emit patterns oldest-first across the whole
+  // window (days of candles), so taking the first match used to anchor the
+  // entry to a zone from days ago, often far from price or already broken,
+  // producing setups that were invalid the moment they were shown. Use the MOST
+  // RECENT zone of each type that is (a) on the correct side of price,
+  // (b) within MAX_ZONE_ATR of price, and (c) not broken by a later close.
+  const MAX_ZONE_ATR = 3;
+  const isBull = direction === 'BULLISH';
+  const zoneLevel = (p: ICTPattern) => (isBull ? p.lowerBound : p.upperBound) ?? p.priceLevel;
+  const pickZone = (type: string): ICTPattern | undefined => {
+    let best: ICTPattern | undefined;
+    for (const p of relevant) {
+      if (p.type !== type) continue;
+      const level = zoneLevel(p);
+      if (!Number.isFinite(level) || level <= 0) continue;
+      if (isBull ? level > price : level < price) continue;
+      if (Math.abs(price - level) > atr * MAX_ZONE_ATR) continue;
+      let broken = false;
+      for (let k = Math.max(0, (p.endIndex ?? 0) + 1); k < bars.length; k++) {
+        const c = bars[k].close;
+        if (isBull ? c < level : c > level) { broken = true; break; }
+      }
+      if (broken) continue;
+      if (!best || (p.endIndex ?? 0) > (best.endIndex ?? 0)) best = p;
+    }
+    return best;
+  };
+
+  // Priority order for entry: Silver Bullet > OTE > OB > FVG > Mitigation
+  const sb  = pickZone('SILVER_BULLET');
+  const ote = pickZone('OTE');
+  const ob  = pickZone('ORDER_BLOCK');
+  const fvg = pickZone('FVG');
+  const mit = pickZone('MITIGATION_BLOCK');
 
   let entry: number;
   let sl: number;
@@ -165,10 +164,12 @@ export function generateTradeSetup(bars: OHLCVBar[], patterns: ICTPattern[]): Tr
   const reward = Math.abs(tp - entry);
   const rr     = risk > 0 ? reward / risk : 0;
 
-  const confluenceNames  = relevant.map((p: ICTPattern) => p.type);
-  const uniqueConfluences = [...new Set(confluenceNames)];
+  // Only the patterns that actually earned points (in play / recent / in bias).
+  const uniqueConfluences = confluence.contributing.length
+    ? confluence.contributing
+    : [...new Set(relevant.map((p: ICTPattern) => p.type))];
 
-  const primaryEntry = sb ? 'Silver Bullet' : ote ? 'OTE Zone' : ob ? 'Order Block' : fvg ? 'FVG' : 'Market Price';
+  const primaryEntry = sb ? 'Silver Bullet' : ote ? 'OTE Zone' : ob ? 'Order Block' : fvg ? 'FVG' : mit ? 'Mitigation Block' : 'Market Price';
 
   return {
     direction: direction as 'BULLISH' | 'BEARISH',

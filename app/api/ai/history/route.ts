@@ -2,8 +2,11 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireUser } from '@/lib/authz';
 
 export async function GET() {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
   try {
     // Get pattern outcomes grouped by type
     const byPattern = await prisma.patternOutcome.groupBy({
@@ -43,7 +46,11 @@ export async function GET() {
         wins: winCount,
         losses: lossCount,
         winRate: total > 0 ? parseFloat(((winCount / total) * 100).toFixed(1)) : 0,
-        avgPnl: parseFloat(((wins?._avg?.pnlPercent ?? 0) + (losses?._avg?.pnlPercent ?? 0)).toFixed(2)),
+        // Count-weighted mean of the win and loss averages (adding the two
+        // averages together, as before, is not an average of anything).
+        avgPnl: total > 0
+          ? parseFloat((((wins?._avg?.pnlPercent ?? 0) * winCount + (losses?._avg?.pnlPercent ?? 0) * lossCount) / total).toFixed(2))
+          : 0,
       };
     });
 

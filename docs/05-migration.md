@@ -33,10 +33,10 @@ This guide covers moving the application to a new server or standing it up fresh
 ```bash
 # 1. Get the code
 git clone https://github.com/mattriedl/ict-futures-platform.git
-cd ict-futures-platform/nextjs_space   # app lives in nextjs_space/
+cd ict-futures-platform                # the app is at the repo root
 
 # 2. Install dependencies
-yarn install   # or: npm install
+npm ci         # .npmrc sets legacy-peer-deps
 
 # 3. Configure environment
 cp .env.example .env
@@ -85,7 +85,7 @@ The `deploy-portable/` folder contains a complete, secret-free container setup:
 | `.env.example` | All required variables with placeholders. |
 
 ```bash
-cd ict-futures-platform/nextjs_space/deploy-portable
+cd ict-futures-platform/deploy-portable
 cp .env.example .env    # fill in secrets
 docker compose up -d --build
 docker compose logs -f
@@ -122,3 +122,23 @@ If you used `prisma migrate deploy` on an empty DB and then restore a dump, rest
 curl -s http://localhost:3456/api/demo/autotrade | head   # app up + endpoint reachable
 ```
 Then in the browser: log in, confirm charts load live prices, confirm detection runs, place a one-click demo trade, and confirm the scheduler fires on its next tick (check timer/cron logs). Verify AI explanations render (confirms LLM config).
+
+---
+
+## 8. Test site (staging)
+
+`deploy/staging/setup-staging.sh` stands up a separate **test site** on the same server, with its own database, port and domain. Changes can be previewed there before they reach the live site.
+
+```bash
+# on the server, as root — copy deploy/staging/setup-staging.sh over, then:
+bash setup-staging.sh ict-test.<your-domain> staging 3460
+```
+
+The repository is private. On first run the script generates a key at `/opt/ict-staging/.ssh/id_ed25519` and prints it if GitHub doesn't accept it yet. Add that key as a **read-only deploy key** (repo Settings → Deploy keys) and re-run. The live test site at `ict-test.wagerassistant.com` uses deploy key "ict-staging server (read-only)".
+
+- Point a DNS record for the test hostname at the server first (Cloudflare proxied is fine).
+- The test site tracks the **`staging`** branch: push or merge a feature branch into `staging` on GitHub, and within ~2 minutes the server pulls, builds and restarts. A failed build leaves the previous version running (`/var/log/ict-staging-sync.status`).
+- Workflow: feature branch → merge into `staging` → check the test site → merge into `main`.
+- It runs its own scheduled cycle (autotrader + alerts) every 30 minutes, has its own Postgres database (`ict_staging`), and sends `noindex` headers.
+- After creating your account on the test site, set **Admin → Registration open** to off so strangers can't sign up.
+- Useful commands: `journalctl -u ict-staging -f`, `systemctl list-timers 'ict-staging*'`, `ict-staging-sync --force`.

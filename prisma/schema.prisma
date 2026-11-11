@@ -185,7 +185,7 @@ model UserSettings {
   refreshInterval  Int     @default(60)
   theme            String  @default("dark")
   trackedSymbols   String  @default("ES=F,NQ=F,CL=F,GC=F")
-  alertMinScore    Float   @default(60)
+  alertMinScore    Float   @default(50) // calibrated to ICT scoring (Nov 2026)
   alertOnOB        Boolean @default(true)
   alertOnFVG       Boolean @default(true)
   alertOnLiqSweep  Boolean @default(true)
@@ -205,7 +205,7 @@ model UserSettings {
   leverageFutures            Float   @default(10) // futures
   // Automated trading (autotrader)
   autoTradeEnabled           Boolean @default(false) // scan & place on-hold auto-trades on schedule
-  autoTradeMinScore          Float   @default(75)     // min setup score to auto-place a pending trade
+  autoTradeMinScore          Float   @default(70)     // min setup score to auto-trade; calibrated to ICT scoring (Nov 2026)
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +236,7 @@ model DemoTrade {
   stopLoss      Float
   takeProfit    Float
   positionSize  Float      @default(1)
+  pointValue    Float?     // USD value of a 1.00 move per contract, fixed at entry (FX converted to USD); null on older trades
   margin        Float?     // dollar margin reserved while OPEN; null/0 once closed
   pendingApproach String?  // for PENDING auto-trades: 'RISE' | 'FALL' — direction price must move to reach entry
   expiresAt     DateTime?  // for PENDING auto-trades: auto-cancel time if entry never reached

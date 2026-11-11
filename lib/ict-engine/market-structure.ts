@@ -58,6 +58,16 @@ export function detectMarketStructureShifts(bars: OHLCVBar[]): ICTPattern[] {
   const recentHighSwings = highs.slice(-3);
   const recentLowSwings  = lows.slice(-3);
 
+  // Index of the first candle after the swing that CLOSED beyond its level —
+  // i.e. when the break actually happened (used for recency in scoring).
+  const breakIndex = (fromIdx: number, level: number, up: boolean): number => {
+    for (let k = fromIdx + 1; k < bars.length; k++) {
+      const c = bars[k]?.close ?? 0;
+      if (up ? c > level : c < level) return k;
+    }
+    return bars.length - 1;
+  };
+
   // --- BOS / MSS detection ---
   for (const sh of recentHighSwings) {
     if ((lastBar?.close ?? 0) > sh.price) {
@@ -77,7 +87,7 @@ export function detectMarketStructureShifts(bars: OHLCVBar[]): ICTPattern[] {
             : 'Break of Structure: continuation of bullish trend — smart money likely accumulating.'
         }`,
         startIndex:  sh.index,
-        endIndex:    bars.length - 1,
+        endIndex:    breakIndex(sh.index, sh.price, true),
       });
     }
   }
@@ -99,7 +109,7 @@ export function detectMarketStructureShifts(bars: OHLCVBar[]): ICTPattern[] {
             : 'Break of Structure: continuation of bearish trend — smart money likely distributing.'
         }`,
         startIndex:  sl.index,
-        endIndex:    bars.length - 1,
+        endIndex:    breakIndex(sl.index, sl.price, false),
       });
     }
   }

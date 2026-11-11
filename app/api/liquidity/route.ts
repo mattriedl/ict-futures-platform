@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { computeLiveLiquidity } from '@/lib/liquidity';
+import { requireUser } from '@/lib/authz';
 import { isCryptoSymbol } from '@/lib/crypto-instruments';
 import { fetchMarketData, getCurrentPrice } from '@/lib/market-data';
 
@@ -18,6 +19,8 @@ import { fetchMarketData, getCurrentPrice } from '@/lib/market-data';
  * Reflects the CURRENT order book. Non-crypto symbols return supported:false.
  */
 export async function GET(request: NextRequest) {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
   try {
     const sp = request.nextUrl.searchParams;
     const symbol = sp.get('symbol') ?? '';
