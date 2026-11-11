@@ -23,7 +23,9 @@ set -euo pipefail
 DOMAIN="${1:?usage: setup-staging.sh <domain> [branch] [port]}"
 BRANCH="${2:-staging}"
 PORT="${3:-3460}"
-REPO_URL="https://github.com/mattriedl/ict-futures-platform.git"
+# The repo is private: the server reads it with a read-only GitHub deploy key at
+# $BASE/.ssh/id_ed25519 (add its .pub under repo Settings -> Deploy keys).
+REPO_URL="${REPO_URL:-git@github.com:mattriedl/ict-futures-platform.git}"
 BASE=/opt/ict-staging
 APP="$BASE/app"
 RUN_USER=ictstage
@@ -50,6 +52,19 @@ sudo -u postgres psql -qtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'"
 
 log "User + code ($BRANCH)"
 id "$RUN_USER" >/dev/null 2>&1 || useradd --system --home-dir "$BASE" --shell /usr/sbin/nologin "$RUN_USER"
+mkdir -p "$BASE/.ssh"; chmod 700 "$BASE/.ssh"
+if [ ! -f "$BASE/.ssh/id_ed25519" ]; then
+  ssh-keygen -q -t ed25519 -N "" -C "ict-staging-deploy@$(hostname)" -f "$BASE/.ssh/id_ed25519"
+fi
+grep -q github.com "$BASE/.ssh/known_hosts" 2>/dev/null || ssh-keyscan -t ed25519 github.com >> "$BASE/.ssh/known_hosts" 2>/dev/null
+chown -R "$RUN_USER:$RUN_USER" "$BASE/.ssh"
+export GIT_SSH_COMMAND="ssh -i $BASE/.ssh/id_ed25519 -o UserKnownHostsFile=$BASE/.ssh/known_hosts -o IdentitiesOnly=yes"
+if ! git ls-remote "$REPO_URL" >/dev/null 2>&1; then
+  echo "The server can't read the repo yet. Add this read-only deploy key on GitHub"
+  echo "(repo Settings -> Deploy keys -> Add deploy key), then re-run this script:"
+  cat "$BASE/.ssh/id_ed25519.pub"
+  exit 2
+fi
 if [ ! -d "$APP/.git" ]; then
   if git ls-remote --exit-code --heads "$REPO_URL" "$BRANCH" >/dev/null 2>&1; then
     git clone -q --branch "$BRANCH" "$REPO_URL" "$APP"

@@ -130,10 +130,11 @@ Then in the browser: log in, confirm charts load live prices, confirm detection 
 `deploy/staging/setup-staging.sh` stands up a separate **test site** on the same server, with its own database, port and domain. Changes can be previewed there before they reach the live site.
 
 ```bash
-# on the server, as root (the app repo is public-read via HTTPS):
-curl -fsSL https://raw.githubusercontent.com/mattriedl/ict-futures-platform/main/deploy/staging/setup-staging.sh -o /root/setup-staging.sh
-bash /root/setup-staging.sh ict-test.<your-domain> staging 3460
+# on the server, as root — copy deploy/staging/setup-staging.sh over, then:
+bash setup-staging.sh ict-test.<your-domain> staging 3460
 ```
+
+The repository is private. On first run the script generates a key at `/opt/ict-staging/.ssh/id_ed25519` and prints it if GitHub doesn't accept it yet. Add that key as a **read-only deploy key** (repo Settings → Deploy keys) and re-run. The live test site at `ict-test.wagerassistant.com` uses deploy key "ict-staging server (read-only)".
 
 - Point a DNS record for the test hostname at the server first (Cloudflare proxied is fine).
 - The test site tracks the **`staging`** branch: push or merge a feature branch into `staging` on GitHub, and within ~2 minutes the server pulls, builds and restarts. A failed build leaves the previous version running (`/var/log/ict-staging-sync.status`).
