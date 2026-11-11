@@ -59,12 +59,14 @@ fi
 grep -q github.com "$BASE/.ssh/known_hosts" 2>/dev/null || ssh-keyscan -t ed25519 github.com >> "$BASE/.ssh/known_hosts" 2>/dev/null
 chown -R "$RUN_USER:$RUN_USER" "$BASE/.ssh"
 export GIT_SSH_COMMAND="ssh -i $BASE/.ssh/id_ed25519 -o UserKnownHostsFile=$BASE/.ssh/known_hosts -o IdentitiesOnly=yes"
-if ! git ls-remote "$REPO_URL" >/dev/null 2>&1; then
+if [ ! -d "$APP/.git" ] && ! git ls-remote "$REPO_URL" >/dev/null 2>&1; then
   echo "The server can't read the repo yet. Add this read-only deploy key on GitHub"
   echo "(repo Settings -> Deploy keys -> Add deploy key), then re-run this script:"
   cat "$BASE/.ssh/id_ed25519.pub"
   exit 2
 fi
+# (A pre-placed checkout in $APP is used as-is; auto-deploy starts once the
+#  deploy key can read the repo.)
 if [ ! -d "$APP/.git" ]; then
   if git ls-remote --exit-code --heads "$REPO_URL" "$BRANCH" >/dev/null 2>&1; then
     git clone -q --branch "$BRANCH" "$REPO_URL" "$APP"
