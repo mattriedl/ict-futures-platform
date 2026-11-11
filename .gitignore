@@ -47,3 +47,5 @@ Thumbs.db
 
 # Alternate Next.js build dir (NEXT_DIST_DIR)
 .build/
+.build-next/
+.build-old/

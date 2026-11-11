@@ -122,3 +122,22 @@ If you used `prisma migrate deploy` on an empty DB and then restore a dump, rest
 curl -s http://localhost:3456/api/demo/autotrade | head   # app up + endpoint reachable
 ```
 Then in the browser: log in, confirm charts load live prices, confirm detection runs, place a one-click demo trade, and confirm the scheduler fires on its next tick (check timer/cron logs). Verify AI explanations render (confirms LLM config).
+
+---
+
+## 8. Test site (staging)
+
+`deploy/staging/setup-staging.sh` stands up a separate **test site** on the same server, with its own database, port and domain. Changes can be previewed there before they reach the live site.
+
+```bash
+# on the server, as root (the app repo is public-read via HTTPS):
+curl -fsSL https://raw.githubusercontent.com/mattriedl/ict-futures-platform/main/deploy/staging/setup-staging.sh -o /root/setup-staging.sh
+bash /root/setup-staging.sh ict-test.<your-domain> staging 3460
+```
+
+- Point a DNS record for the test hostname at the server first (Cloudflare proxied is fine).
+- The test site tracks the **`staging`** branch: push or merge a feature branch into `staging` on GitHub, and within ~2 minutes the server pulls, builds and restarts. A failed build leaves the previous version running (`/var/log/ict-staging-sync.status`).
+- Workflow: feature branch → merge into `staging` → check the test site → merge into `main`.
+- It runs its own scheduled cycle (autotrader + alerts) every 30 minutes, has its own Postgres database (`ict_staging`), and sends `noindex` headers.
+- After creating your account on the test site, set **Admin → Registration open** to off so strangers can't sign up.
+- Useful commands: `journalctl -u ict-staging -f`, `systemctl list-timers 'ict-staging*'`, `ict-staging-sync --force`.
