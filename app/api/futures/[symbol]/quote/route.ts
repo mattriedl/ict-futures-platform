@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchLiveQuote, deriveLiveAssetClass, type LiveQuote } from '@/lib/live-quote';
+import { requireUser } from '@/lib/authz';
+import { decodeSymbol } from '@/lib/symbols';
 
 // Real-time, timeframe-independent live quote for the chart header + analysis.
 // Always returns HTTP 200 so the client can render a graceful
@@ -10,13 +12,10 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { symbol: string } },
 ) {
-  let symbol = params?.symbol ?? '';
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
   // Symbols contain '=' (e.g. NQ=F, EURUSD=X) which may arrive URL-encoded.
-  try {
-    symbol = decodeURIComponent(symbol);
-  } catch {
-    // keep raw symbol if it isn't valid percent-encoding
-  }
+  const symbol = decodeSymbol(params?.symbol);
 
   try {
     const quote = await fetchLiveQuote(symbol);

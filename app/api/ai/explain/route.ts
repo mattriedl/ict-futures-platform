@@ -2,13 +2,18 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
 import { getLlmConfig, chatCompletionsUrl } from '@/lib/llm';
+import { requireUser } from '@/lib/authz';
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
   try {
-    const body = await request.json();
-    const { patterns, symbol, timeframe, currentPrice, bias, session, killZone } = body ?? {};
+    const body = await request.json().catch(() => ({}));
+    const { symbol, timeframe, currentPrice, bias, session, killZone } = body ?? {};
+    // Cap what gets sent to the LLM (cost + prompt size).
+    const patterns = Array.isArray(body?.patterns) ? body.patterns.slice(0, 60) : [];
 
-    const patternSummary = (patterns ?? [])
+    const patternSummary = patterns
       .map((p: any) => `• [${p?.direction}] ${p?.type?.replace?.(/_/g, ' ')}: ${p?.description} (Confidence: ${p?.confidence ?? 0}%)`)
       .join('\n');
 
@@ -54,7 +59,10 @@ Provide:
       );
     }
 
-    const response = await fetch(chatCompletionsUrl(llm.baseUrl), {
+    let response: Response;
+    try {
+      response = await fetch(chatCompletionsUrl(llm.baseUrl), {
+      signal: AbortSignal.timeout(120_000),
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -66,13 +74,28 @@ Provide:
         stream: true,
         max_tokens: 1200,
       }),
-    });
+      });
+    } catch (e) {
+      console.error('AI provider unreachable:', (e as Error)?.message);
+      return new Response(
+        JSON.stringify({ error: 'Could not reach the AI provider. Check LLM_BASE_URL and that the server can reach it.' }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('AI API error:', response.status, errorText);
-      return new Response(JSON.stringify({ error: `AI API error: ${response.status}` }), {
-        status: response.status,
+      console.error('AI API error:', response.status, errorText.slice(0, 500));
+      const hint =
+        response.status === 401 ? 'the API key was rejected'
+        : response.status === 402 ? 'the provider says the account needs payment/credits'
+        : response.status === 404 ? `model "${llm.model}" or the base URL was not found`
+        : response.status === 429 ? 'the provider is rate-limiting requests'
+        : 'the provider returned an error';
+      // 502: the upstream failed. Never forward the provider's 401 (the browser
+      // would read it as "you are logged out").
+      return new Response(JSON.stringify({ error: `AI provider error ${response.status}: ${hint}.` }), {
+        status: 502,
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -86,14 +109,13 @@ Provide:
           while (true) {
             const { done, value } = await (reader?.read() ?? { done: true, value: undefined });
             if (done) break;
-            const chunk = decoder.decode(value);
-            controller.enqueue(encoder.encode(chunk));
+            // stream:true keeps multi-byte characters intact across chunks.
+            controller.enqueue(encoder.encode(decoder.decode(value, { stream: true })));
           }
+          controller.close();
         } catch (error) {
           console.error('Stream error:', error);
           controller.error(error);
-        } finally {
-          controller.close();
         }
       },
     });

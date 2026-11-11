@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { INSTRUMENTS } from '@/lib/instruments';
 
 export async function GET() {
   try {
@@ -58,6 +59,39 @@ export async function PUT(request: NextRequest) {
     const autoTradeEnabled = body?.autoTradeEnabled != null ? Boolean(body.autoTradeEnabled) : undefined;
     const autoTradeMinScore = clamp(body?.autoTradeMinScore, 0, 100);
 
+    // General / alert preferences — validated so a bad value can't 500 the save.
+    const bool = (v: any): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
+    const refreshInterval = clamp(body?.refreshInterval, 10, 3600);
+    const alertMinScore = clamp(body?.alertMinScore, 0, 100);
+    const theme = typeof body?.theme === 'string' && ['dark', 'light'].includes(body.theme) ? body.theme : undefined;
+    const validSymbols = new Set(INSTRUMENTS.map((i) => i.symbol));
+    const trackedSymbols =
+      typeof body?.trackedSymbols === 'string'
+        ? Array.from(new Set(body.trackedSymbols.split(',').map((x: string) => x.trim()).filter((x: string) => validSymbols.has(x)))).join(',')
+        : undefined;
+    let alertEmail: string | null | undefined;
+    if (body?.alertEmail !== undefined) {
+      const e = typeof body.alertEmail === 'string' ? body.alertEmail.trim() : '';
+      if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
+        return NextResponse.json({ error: 'Alert email address is not valid.' }, { status: 400 });
+      }
+      alertEmail = e || null;
+    }
+    const generalFields = {
+      ...(refreshInterval != null ? { refreshInterval: Math.round(refreshInterval) } : {}),
+      ...(alertMinScore != null ? { alertMinScore } : {}),
+      ...(theme ? { theme } : {}),
+      ...(trackedSymbols ? { trackedSymbols } : {}),
+      ...(bool(body?.alertOnOB) != null ? { alertOnOB: body.alertOnOB } : {}),
+      ...(bool(body?.alertOnFVG) != null ? { alertOnFVG: body.alertOnFVG } : {}),
+      ...(bool(body?.alertOnLiqSweep) != null ? { alertOnLiqSweep: body.alertOnLiqSweep } : {}),
+      ...(bool(body?.alertOnMSS) != null ? { alertOnMSS: body.alertOnMSS } : {}),
+      ...(bool(body?.alertOnOTE) != null ? { alertOnOTE: body.alertOnOTE } : {}),
+      ...(bool(body?.notificationsOn) != null ? { notificationsOn: body.notificationsOn } : {}),
+      ...(bool(body?.emailAlertsEnabled) != null ? { emailAlertsEnabled: body.emailAlertsEnabled } : {}),
+      ...(alertEmail !== undefined ? { alertEmail } : {}),
+    };
+
     const riskFields = {
       ...(riskPercent != null ? { riskPercent } : {}),
       ...(maxDailyLossPercent != null ? { maxDailyLossPercent } : {}),
@@ -72,26 +106,8 @@ export async function PUT(request: NextRequest) {
 
     const settings = await prisma.userSettings.upsert({
       where: { userId },
-      update: {
-        refreshInterval: body?.refreshInterval ?? 60,
-        theme: body?.theme ?? 'dark',
-        trackedSymbols: body?.trackedSymbols ?? 'ES=F,NQ=F,CL=F,GC=F',
-        alertMinScore: body?.alertMinScore ?? 60,
-        alertOnOB: body?.alertOnOB ?? true,
-        alertOnFVG: body?.alertOnFVG ?? true,
-        alertOnLiqSweep: body?.alertOnLiqSweep ?? true,
-        alertOnMSS: body?.alertOnMSS ?? true,
-        alertOnOTE: body?.alertOnOTE ?? true,
-        notificationsOn: body?.notificationsOn ?? true,
-        ...riskFields,
-      },
-      create: {
-        userId,
-        refreshInterval: body?.refreshInterval ?? 60,
-        theme: body?.theme ?? 'dark',
-        trackedSymbols: body?.trackedSymbols ?? 'ES=F,NQ=F,CL=F,GC=F',
-        ...riskFields,
-      },
+      update: { ...generalFields, ...riskFields },
+      create: { userId, ...generalFields, ...riskFields },
     });
 
     return NextResponse.json({ settings });

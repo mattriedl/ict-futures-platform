@@ -32,7 +32,7 @@ Each detector is its own module in `lib/ict-engine/`:
 |---|---|
 | `analyzeICT()` | Runs all detectors over a candle series and returns the detected patterns. |
 | `scoreConfluence()` | Combines detected patterns into a single **confluence score** (higher = more aligned confirmation). This score drives alerts (`alertMinScore`) and autotrade entry (`autoTradeMinScore`). |
-| `generateTradeSetup()` | Produces a concrete setup from the confluence: entry, stop-loss, take-profit (and thus R:R). |
+| `generateTradeSetup()` | Produces a concrete setup from the confluence: entry, stop-loss (entry ∓ 1.5×ATR), take-profit (entry ± 3×ATR, extended to the nearest EQH/EQL or PDH/PDL). The entry anchors to the **most recent** zone (priority Silver Bullet → OTE → Order Block → FVG → Mitigation) that is on the correct side of price, within 3×ATR, and not broken by a later close; otherwise it uses the market price. |
 
 To tune behavior, adjust detector thresholds inside the individual modules or the weighting inside `scoreConfluence()`. After changing scoring, re-run `scripts/verify-calcs.ts` and backtests, and (per project rules) test in a feature branch before merging to `main`.
 
@@ -78,7 +78,7 @@ Use `scripts/verify-calcs.ts` to validate these formulas against stored trades a
 
 ## 6. Backtesting
 
-`lib/backtest.ts` replays historical candles through `analyzeICT()` / `scoreConfluence()` / `generateTradeSetup()` and simulates trade outcomes using the same margin/PnL math, writing results to `BacktestRun`. Exposed via `/api/backtest` and the Backtest page. Gated by `AppSettings.backtestingEnabled`.
+`lib/backtest.ts` replays historical candles through `analyzeICT()` / `scoreConfluence()` / `generateTradeSetup()` on a rolling 400-bar window (like live analysis). It fills at the signal bar's **close** using the autotrader's freshness rules, scores Kill Zones at the bar's own time, and resolves TP/SL on later bars only. Max drawdown is measured on an account risking `riskPerTrade`% per trade. Results go to `BacktestRun`. It refuses to run without enough real history. Exposed via `/api/backtest` and the Backtest page. Gated by `AppSettings.backtestingEnabled`.
 
 ---
 

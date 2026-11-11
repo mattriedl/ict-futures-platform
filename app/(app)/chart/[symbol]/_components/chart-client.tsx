@@ -154,6 +154,7 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
   const [quote, setQuote]                           = useState<LiveQuote | null>(null);
   // Remember the last real price so a transient stale quote doesn't blank the header.
   const [lastGoodPrice, setLastGoodPrice]           = useState<number | null>(null);
+  const [dataUnavailable, setDataUnavailable]       = useState(false);
 
   const currentSymbol = SYMBOLS.find(s => s.symbol === symbol) ?? SYMBOLS[0];
 
@@ -168,7 +169,11 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
       if (dataRes.ok) {
         const data = await dataRes.json();
         setBars(data?.bars ?? []);
+        setDataUnavailable(Boolean(data?.unavailable));
         setSession({ session: data?.session, killZone: data?.killZone });
+      } else {
+        setBars([]);
+        setDataUnavailable(true);
       }
       if (analysisRes.ok) {
         const analysis = await analysisRes.json();
@@ -231,6 +236,7 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
 
     try {
       const lastBar = bars?.[bars.length - 1];
+      const livePrice = quote?.price ?? lastGoodPrice ?? lastBar?.close ?? 0;
       const res = await fetch('/api/ai/explain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -238,14 +244,18 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
           patterns,
           symbol,
           timeframe,
-          currentPrice: lastBar?.close ?? 0,
+          currentPrice: livePrice,
           bias,
           session: session?.session,
           killZone: session?.killZone,
         }),
       });
 
-      if (!res.ok) throw new Error('AI request failed');
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        setAiExplanation(err?.error ?? 'Failed to generate AI analysis. Please try again.');
+        return;
+      }
 
       const reader  = res.body?.getReader();
       const decoder = new TextDecoder();
@@ -281,6 +291,13 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
   };
 
   const filteredPatterns = patterns.filter(p => enabledOverlays?.[p?.type] !== false);
+  // Draw only patterns that formed in the most recent candles; the full window
+  // (days of data) produces hundreds of overlapping labels that hide price.
+  // The pattern list in the side panel still shows everything.
+  const OVERLAY_RECENT_BARS = 120;
+  const chartPatterns = filteredPatterns.filter(
+    (p: any) => typeof p?.endIndex !== 'number' || p.endIndex >= bars.length - OVERLAY_RECENT_BARS,
+  );
 
   const patternsByType = filteredPatterns.reduce<Record<string, Pattern[]>>((acc, p) => {
     if (!acc[p.type]) acc[p.type] = [];
@@ -458,8 +475,16 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
         )}
 
         {/* Chart */}
-        <div className="flex-1 p-4">
-          <CandlestickChart bars={bars} patterns={filteredPatterns} loading={loading} />
+        <div className="flex-1 p-4 relative">
+          <CandlestickChart bars={bars} patterns={chartPatterns} loading={loading} />
+          {dataUnavailable && !loading && (
+            <div className="absolute inset-4 flex items-center justify-center pointer-events-none">
+              <div className="bg-[#1A1F35]/90 border border-amber-500/30 text-amber-300 text-sm rounded-lg px-4 py-3 max-w-md text-center">
+                Market data for {symbol} is unavailable right now. The data source didn&apos;t respond;
+                this page retries automatically. No prices are simulated.
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Overlay Toggles */}
@@ -618,7 +643,7 @@ export function ChartClient({ symbol: initialSymbol }: { symbol: string }) {
                           style={{ width: `${p?.confidence ?? 0}%` }}
                         />
                       </div>
-                      <span className="text-[10px] font-mono text-gray-400">{p?.confidence ?? 0}%</span>
+                      <span className="text-[10px] font-mono text-gray-400">{Math.round(p?.confidence ?? 0)}%</span>
                     </div>
                   </div>
                 ))

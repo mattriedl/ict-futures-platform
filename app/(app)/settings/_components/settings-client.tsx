@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Settings, Bell, Clock, Palette, Save, CheckCircle, Shield, Gauge } from 'lucide-react';
 import { toast } from 'sonner';
+import { INSTRUMENTS, INSTRUMENT_CATEGORIES } from '@/lib/instruments';
 
 export function SettingsClient() {
   const [settings, setSettings] = useState<any>(null);
@@ -36,9 +37,12 @@ export function SettingsClient() {
         body: JSON.stringify(settings),
       });
       if (res.ok) {
+        const json = await res.json().catch(() => null);
+        if (json?.settings) setSettings(json.settings);
         toast.success('Settings saved successfully');
       } else {
-        toast.error('Failed to save settings');
+        const err = await res.json().catch(() => null);
+        toast.error(err?.error ?? 'Failed to save settings');
       }
     } catch (err: any) {
       toast.error('Failed to save settings');
@@ -105,11 +109,14 @@ export function SettingsClient() {
           <h2 className="text-lg font-display font-semibold text-white">Notifications</h2>
         </div>
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-300">Enable Browser Notifications</span>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <span className="text-sm text-gray-300">Generate setup alerts</span>
+              <p className="text-xs text-gray-500 mt-0.5">Checked on each scheduled cycle for your tracked instruments.</p>
+            </div>
             <button
               onClick={() => setSettings((prev: any) => ({ ...(prev ?? {}), notificationsOn: !(prev?.notificationsOn ?? true) }))}
-              className={`relative w-11 h-6 rounded-full transition-colors ${
+              className={`relative w-11 h-6 shrink-0 rounded-full transition-colors ${
                 settings?.notificationsOn ? 'bg-blue-500' : 'bg-gray-600'
               }`}
             >
@@ -118,6 +125,36 @@ export function SettingsClient() {
               }`} />
             </button>
           </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <span className="text-sm text-gray-300">Email me new alerts</span>
+              <p className="text-xs text-gray-500 mt-0.5">Requires the server&apos;s Gmail settings and the admin email switch.</p>
+            </div>
+            <button
+              onClick={() => setSettings((prev: any) => ({ ...(prev ?? {}), emailAlertsEnabled: !(prev?.emailAlertsEnabled ?? false) }))}
+              className={`relative w-11 h-6 shrink-0 rounded-full transition-colors ${
+                settings?.emailAlertsEnabled ? 'bg-blue-500' : 'bg-gray-600'
+              }`}
+            >
+              <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                settings?.emailAlertsEnabled ? 'translate-x-5' : 'translate-x-0'
+              }`} />
+            </button>
+          </div>
+
+          {settings?.emailAlertsEnabled && (
+            <div>
+              <label className="text-sm text-gray-400 mb-2 block">Send alerts to (blank = your login email)</label>
+              <input
+                type="email"
+                value={settings?.alertEmail ?? ''}
+                onChange={(e) => setSettings((prev: any) => ({ ...(prev ?? {}), alertEmail: e.target.value }))}
+                placeholder="you@example.com"
+                className="w-full bg-[#0A0E1A] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500/50"
+              />
+            </div>
+          )}
 
           <div>
             <label className="text-sm text-gray-400 mb-2 block">Minimum AI Score for Alerts</label>
@@ -175,30 +212,44 @@ export function SettingsClient() {
           <Settings className="w-5 h-5 text-purple-400" />
           <h2 className="text-lg font-display font-semibold text-white">Tracked Instruments</h2>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {['ES=F', 'NQ=F', 'CL=F', 'GC=F'].map((sym: string) => {
-            const tracked = (settings?.trackedSymbols ?? '').split(',').includes(sym);
-            return (
-              <button
-                key={sym}
-                onClick={() => {
+        <p className="text-xs text-gray-500 mb-3">
+          Shown on the dashboard and scanned for alerts (up to 20).
+        </p>
+        <div className="space-y-4">
+          {INSTRUMENT_CATEGORIES.map((cat) => (
+            <div key={cat}>
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">{cat}</div>
+              <div className="flex flex-wrap gap-2">
+                {INSTRUMENTS.filter((i) => i.category === cat).map((inst) => {
+                  const sym = inst.symbol;
                   const current = (settings?.trackedSymbols ?? '').split(',').filter(Boolean);
-                  const updated = tracked
-                    ? current.filter((s: string) => s !== sym)
-                    : [...current, sym];
-                  setSettings((prev: any) => ({ ...(prev ?? {}), trackedSymbols: updated.join(',') }));
-                }}
-                className={`px-4 py-2 rounded-lg text-sm font-mono transition-all ${
-                  tracked
-                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                    : 'bg-white/5 text-gray-500 border border-white/5 hover:border-white/10'
-                }`}
-              >
-                {sym.replace('=F', '')}
-                {tracked && <CheckCircle className="w-3.5 h-3.5 inline ml-2" />}
-              </button>
-            );
-          })}
+                  const tracked = current.includes(sym);
+                  return (
+                    <button
+                      key={sym}
+                      title={inst.name}
+                      onClick={() => {
+                        if (!tracked && current.length >= 20) {
+                          toast.error('You can track up to 20 instruments.');
+                          return;
+                        }
+                        const updated = tracked ? current.filter((s: string) => s !== sym) : [...current, sym];
+                        setSettings((prev: any) => ({ ...(prev ?? {}), trackedSymbols: updated.join(',') }));
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                        tracked
+                          ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                          : 'bg-white/5 text-gray-500 border border-white/5 hover:border-white/10'
+                      }`}
+                    >
+                      {sym.replace('=F', '').replace('=X', '')}
+                      {tracked && <CheckCircle className="w-3 h-3 inline ml-1.5" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </motion.div>
 

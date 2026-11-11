@@ -57,8 +57,7 @@ export function BacktestClient() {
       const json = await res.json();
       if (!res.ok) { toast.error(json.error || 'Backtest failed'); return; }
       setResult(json.result);
-      if (json.result?.synthetic) toast.warning('Yahoo data unavailable — ran on synthetic data (indicative only).');
-      else toast.success(`Backtest complete — ${json.result.totalTrades} trades`);
+      toast.success(`Backtest complete — ${json.result.totalTrades} trades`);
       loadRuns();
     } catch (e) {
       toast.error('Backtest request failed');

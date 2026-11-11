@@ -1,10 +1,11 @@
 [Unit]
-Description=ICT Autotrader local backstop (hourly scan via endpoint)
+Description=ICT Futures scheduled cycle (autotrader + alerts) via local endpoint
 After=network-online.target ict-futures.service
 Wants=network-online.target
-RequiresMountsFor=/home/ubuntu
 
 [Service]
 Type=oneshot
-User=ubuntu
-ExecStart=/home/ubuntu/ict_project/nextjs_space/deploy/ict-autotrade-local.sh
+# Edit to match the install: the user that owns the app, and its directory.
+User=__RUN_USER__
+Environment=APP_DIR=__PROJECT_DIR__
+ExecStart=__PROJECT_DIR__/deploy/ict-autotrade-local.sh

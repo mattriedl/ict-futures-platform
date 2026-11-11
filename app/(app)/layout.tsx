@@ -1,15 +1,16 @@
 import { redirect } from 'next/navigation';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getSessionUser } from '@/lib/authz';
 import { AppSidebar } from './_components/app-sidebar';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const session = await getServerSession(authOptions);
-  if (!session) {
+  // Role is read from the database (not the session token) so the sidebar
+  // reflects promotions/demotions immediately; deleted accounts are signed out.
+  const user = await getSessionUser();
+  if (!user) {
     redirect('/login');
   }
 
-  const role = (session.user as any)?.role ?? 'USER';
+  const role = user.role;
 
   return (
     <div className="flex h-screen bg-[#0A0E1A] overflow-hidden">

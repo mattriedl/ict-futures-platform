@@ -8,13 +8,26 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { formatPrice } from '@/lib/format';
+import { getInstrumentMeta } from '@/lib/instruments';
 
-const SYMBOLS = [
-  { symbol: 'ES=F', name: 'E-mini S&P 500', shortName: 'ES', color: 'blue' },
-  { symbol: 'NQ=F', name: 'E-mini Nasdaq 100', shortName: 'NQ', color: 'purple' },
-  { symbol: 'CL=F', name: 'Crude Oil WTI', shortName: 'CL', color: 'amber' },
-  { symbol: 'GC=F', name: 'Gold', shortName: 'GC', color: 'yellow' },
-];
+interface DashSymbol { symbol: string; name: string; shortName: string; color: string }
+
+const COLORS = ['blue', 'purple', 'amber', 'yellow'];
+const DEFAULT_TRACKED = 'ES=F,NQ=F,CL=F,GC=F';
+
+/** Build dashboard cards from the user's tracked-symbol setting. */
+function buildSymbols(tracked: string): DashSymbol[] {
+  const list = Array.from(new Set(tracked.split(',').map((s) => s.trim()).filter(Boolean))).slice(0, 20);
+  return list.map((symbol, i) => {
+    const meta = getInstrumentMeta(symbol);
+    return {
+      symbol,
+      name: meta?.name ?? symbol,
+      shortName: symbol.replace('=F', '').replace('=X', ''),
+      color: COLORS[i % COLORS.length],
+    };
+  });
+}
 
 interface FuturesData {
   currentPrice: number;
@@ -58,16 +71,29 @@ export function DashboardClient() {
   // Minimum AI score threshold — reuses the existing user setting (alertMinScore).
   const [minScore, setMinScore] = useState(60);
   const [drawdown, setDrawdown] = useState<DrawdownStatus | null>(null);
+  const [symbols, setSymbols] = useState<DashSymbol[]>(() => buildSymbols(DEFAULT_TRACKED));
+  const [refreshMs, setRefreshMs] = useState(60000);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
       const results = await Promise.allSettled(
-        SYMBOLS.map(async (s: any) => {
-          const [dataRes, analysisRes] = await Promise.all([
+        symbols.map(async (s) => {
+          const [dataRes, analysisRes, quoteRes] = await Promise.all([
             fetch(`/api/futures/${encodeURIComponent(s.symbol)}/data?timeframe=15m`),
             fetch(`/api/futures/${encodeURIComponent(s.symbol)}/analyze?timeframe=15m`),
+            fetch(`/api/futures/${encodeURIComponent(s.symbol)}/quote`),
           ]);
           const data = dataRes.ok ? await dataRes.json() : null;
+          // Price and change come from the live quote (vs prior close / 24h open),
+          // matching the chart header. The candle-to-candle change shown before
+          // was usually +0.00.
+          const quote = quoteRes.ok ? await quoteRes.json() : null;
+          if (data && quote && !quote.stale && quote.price != null) {
+            data.currentPrice = quote.price;
+            if (quote.change != null) data.change = quote.change;
+            if (quote.changePct != null) data.changePct = quote.changePct;
+          }
           const analysis = analysisRes.ok ? await analysisRes.json() : null;
           return { symbol: s.symbol, data, analysis };
         })
@@ -96,13 +122,16 @@ export function DashboardClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [symbols]);
 
+  // Wait for the user's settings so we fetch their tracked instruments (not the
+  // defaults) and poll at their configured refresh interval.
   useEffect(() => {
+    if (!settingsLoaded) return;
     fetchData();
-    const interval = setInterval(fetchData, 60000);
+    const interval = setInterval(fetchData, refreshMs);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, refreshMs, settingsLoaded]);
 
   // Load the configured minimum AI score threshold (reuse existing user setting).
   useEffect(() => {
@@ -113,7 +142,13 @@ export function DashboardClient() {
         const json = await res.json();
         const v = json?.settings?.alertMinScore;
         if (typeof v === 'number' && !Number.isNaN(v)) setMinScore(v);
-      } catch { /* keep default threshold */ }
+        const tracked = json?.settings?.trackedSymbols;
+        if (typeof tracked === 'string' && tracked.trim()) setSymbols(buildSymbols(tracked));
+        const ri = json?.settings?.refreshInterval;
+        if (typeof ri === 'number' && ri >= 10) setRefreshMs(ri * 1000);
+      } catch { /* keep defaults */ } finally {
+        setSettingsLoaded(true);
+      }
     })();
   }, []);
 
@@ -150,17 +185,20 @@ export function DashboardClient() {
     return () => clearInterval(interval);
   }, []);
 
-  const allSetups = SYMBOLS.map((s: any) => {
+  // Rank by the learning-weighted score when present — the same score the
+  // autotrader and alerts use — falling back to the raw confluence score.
+  const scoreOf = (s: any) => s?.weightedScore ?? s?.aiScore ?? 0;
+  const allSetups = symbols.map((s) => {
     const analysis = analysisData?.[s.symbol];
     if (!analysis?.setup) return null;
     return { ...(analysis.setup ?? {}), symbol: s.symbol, shortName: s.shortName, bias: analysis?.bias };
-  }).filter(Boolean).sort((a: any, b: any) => (b?.aiScore ?? 0) - (a?.aiScore ?? 0));
+  }).filter(Boolean).sort((a: any, b: any) => scoreOf(b) - scoreOf(a));
 
   // Opportunity screener: every setup that clears the configured minimum AI score,
   // kept sorted by aiScore descending. Cap the rendered rows so a large qualifying
   // list stays scrollable instead of overflowing the layout.
   const MAX_VISIBLE_SETUPS = 25;
-  const qualifyingSetups = allSetups.filter((s: any) => (s?.aiScore ?? 0) >= minScore);
+  const qualifyingSetups = allSetups.filter((s: any) => scoreOf(s) >= minScore);
   const visibleSetups = qualifyingSetups.slice(0, MAX_VISIBLE_SETUPS);
 
   const sessions = [
@@ -267,7 +305,7 @@ export function DashboardClient() {
 
       {/* Futures Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        {SYMBOLS.map((s: any, idx: number) => {
+        {symbols.map((s, idx: number) => {
           const data = futuresData?.[s.symbol];
           const analysis = analysisData?.[s.symbol];
           const isUp = (data?.change ?? 0) >= 0;

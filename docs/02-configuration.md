@@ -47,11 +47,11 @@ Stored one row per user; edited via the Settings UI (`/api/settings`).
 | :-- | :-- | :-- |
 | `refreshInterval` | `60` | Dashboard/chart auto-refresh seconds. |
 | `theme` | `dark` | UI theme. |
-| `trackedSymbols` | `ES=F,NQ=F,CL=F,GC=F` | Comma-separated symbols shown on the dashboard. |
+| `trackedSymbols` | `ES=F,NQ=F,CL=F,GC=F` | Up to 20 symbols shown on the dashboard and scanned for alerts (pick any instrument in Settings). |
 | `alertMinScore` | `60` | Minimum setup score to raise an alert. |
 | `alertOnOB` / `alertOnFVG` / `alertOnLiqSweep` / `alertOnMSS` / `alertOnOTE` | `true` | Per-pattern alert toggles. |
-| `notificationsOn` | `true` | Master in-app notification toggle. |
-| `emailAlertsEnabled` | `false` | Send alerts by email (needs Gmail env vars). |
+| `notificationsOn` | `true` | "Generate setup alerts": master switch for alert generation in the scheduled cycle. |
+| `emailAlertsEnabled` | `false` | Also email each new alert (needs Gmail env vars and the admin's global email switch). |
 | `alertEmail` | — | Override recipient for email alerts. |
 | `riskPercent` | `1` | % of balance risked per demo trade (drives position sizing). |
 | `maxDailyLossPercent` | `4` | Daily loss limit (% of day-start balance). |
@@ -90,7 +90,7 @@ Single global row (`id="global"`), edited via `/api/admin/settings`.
 Tradable instruments live in the `Instrument` model (symbol, name, exchange,
 `tickSize`, `pointValue`, `active`). Seeded by `npm run seed` (futures) plus a
 curated crypto set (`scripts/curate-crypto.ts`, `lib/crypto-instruments.ts`) —
-65 total (15 futures + 22 crypto + 28 forex, defined in `lib/instruments.ts`). Manage them in **Admin → Instruments** or
+64 total (14 futures + 22 crypto + 28 forex, defined in `lib/instruments.ts`). Manage them in **Admin → Instruments** or
 by editing the seed scripts. `pointValue` is critical for correct P&L (e.g. ES=F
 = $50/point, MES=F = $5/point); see [docs/08](./08-trading-engine.md).
 

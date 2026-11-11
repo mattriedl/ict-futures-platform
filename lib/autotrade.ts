@@ -38,6 +38,9 @@ import { getOrCreateDemoAccount, getDrawdownStatus } from '@/lib/demo-trades';
 // stale, expired-analysis limit orders don't linger (new orders open at market).
 export const AUTOTRADE_PENDING_TTL_MS = 2 * 60 * 60 * 1000; // 2h
 
+// Minimum fraction of the 1%-risk size a bankroll-capped trade must keep.
+const MIN_SIZE_FRACTION = 0.25;
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
@@ -287,6 +290,13 @@ export async function runAutoTrade(
       let requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, instrument.pointValue);
       if (requiredMargin > availableBalance) {
         const scale = (availableBalance / requiredMargin) * 0.99;
+        // If the bankroll only covers a sliver of the intended risk, skip the
+        // trade instead of opening a meaningless dust position.
+        if (scale < MIN_SIZE_FRACTION) {
+          skipped++;
+          diagnostics.push({ symbol, weightedScore: Math.round(score), reason: 'insufficient-bankroll' });
+          continue;
+        }
         positionSize = round4(positionSize * scale);
         requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, instrument.pointValue);
       }

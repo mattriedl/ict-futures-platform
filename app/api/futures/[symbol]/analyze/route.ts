@@ -1,8 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { requireUser } from '@/lib/authz';
+import { decodeSymbol } from '@/lib/symbols';
 import { prisma } from '@/lib/prisma';
 import { getSessionInfo } from '@/lib/yahoo-finance';
 import { fetchMarketData } from '@/lib/market-data';
@@ -14,11 +14,15 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { symbol: string } }
 ) {
+  const auth = await requireUser();
+  if (auth.response) return auth.response;
+  const userId = auth.user.id;
   try {
-    const symbol    = params?.symbol ?? '';
+    const symbol    = decodeSymbol(params?.symbol);
     const timeframe = request.nextUrl.searchParams.get('timeframe') ?? '15m';
 
     const bars      = await fetchMarketData(symbol, timeframe);
+    const unavailable = bars.length === 0;
     const patterns  = analyzeICT(bars);
     const confluence = scoreConfluence(patterns);
     const setup     = generateTradeSetup(bars, patterns);
@@ -75,8 +79,6 @@ export async function GET(
       // Best-effort log with light dedupe (skip if a matching un-resolved setup
       // was logged for the same symbol+timeframe+bias in the last 15 minutes).
       try {
-        const session = await getServerSession(authOptions);
-        const userId = (session?.user as any)?.id ?? null;
         const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000);
         const recent = await prisma.setupLog.findFirst({
           where: {
@@ -85,7 +87,7 @@ export async function GET(
             bias,
             outcome: null,
             detectedAt: { gte: fifteenMinAgo },
-            ...(userId ? { userId } : { userId: null }),
+            userId,
           },
           select: { id: true },
         });
@@ -114,6 +116,7 @@ export async function GET(
     return NextResponse.json({
       symbol,
       timeframe,
+      unavailable,
       currentPrice:     currentPrice,
       patterns,
       confluence,
