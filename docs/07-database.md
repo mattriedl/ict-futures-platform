@@ -54,6 +54,7 @@ Migration history:
 |---|---|
 | `0_init` | Original schema as first generated. |
 | `20261107000000_sync_schema_with_app` | Catch-up: `SetupLog` table; `DemoTrade.margin/pendingApproach/expiresAt/dataSource`; `UserSettings` risk, drawdown, leverage and autotrade fields. All additive with defaults. |
+| `20261111000000_demotrade_point_value` | `DemoTrade.pointValue` (USD per 1.00 move, fixed at entry). Nullable, additive. |
 
 Before the catch-up migration existed, `prisma migrate deploy` on a fresh database produced an incomplete schema (the Abacus DB had been kept in sync with `prisma db push`). **If you are moving an existing database that already has these columns** (e.g. restoring an Abacus `pg_dump`), mark the catch-up migration as already applied instead of running it:
 

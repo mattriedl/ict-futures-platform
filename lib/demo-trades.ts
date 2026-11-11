@@ -28,6 +28,8 @@ export interface PnlResult {
 
 /**
  * Compute realized P&L for a trade given an exit price.
+ * Pass the trade's stored `pointValue` (USD per 1.00 move, fixed at entry) when
+ * it has one; older trades fall back to the instrument's configured value.
  * LONG:  profit when exit > entry.  SHORT: profit when exit < entry.
  * rMultiple = price move in favor / initial risk (entry->stop distance).
  */
@@ -167,7 +169,7 @@ export async function evaluateOpenTrades(userId?: string): Promise<number> {
         const pnlRes = computeTradePnl(
           trade,
           resolution.exitPrice,
-          (trade as any).instrument?.pointValue,
+          trade.pointValue ?? (trade as any).instrument?.pointValue,
         );
         // Atomically flip the trade OPEN -> WIN/LOSS and credit the balance.
         // The status='OPEN' guard makes this safe against concurrent evaluations
@@ -367,7 +369,7 @@ export async function getUnrealizedPnl(trade: DemoTrade): Promise<number> {
     const bars = await fetchMarketData(trade.symbol, trade.timeframe);
     const price = getCurrentPrice(bars);
     if (!price) return 0;
-    return computeTradePnl(trade, price, (trade as any).instrument?.pointValue).pnl;
+    return computeTradePnl(trade, price, trade.pointValue ?? (trade as any).instrument?.pointValue).pnl;
   } catch {
     return 0;
   }

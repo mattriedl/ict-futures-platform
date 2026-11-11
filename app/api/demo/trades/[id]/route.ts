@@ -62,7 +62,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (trade.status !== 'OPEN') {
       return NextResponse.json({ error: 'Only open trades can be closed manually.' }, { status: 400 });
     }
-    const pnlRes = computeTradePnl(trade, exitPrice, trade.instrument?.pointValue);
+    const pnlRes = computeTradePnl(trade, exitPrice, trade.pointValue ?? trade.instrument?.pointValue);
     // Atomic close guarded on status='OPEN' so a double-click or a concurrent
     // auto-evaluation can never credit the balance twice for the same trade.
     const applied = await prisma.$transaction(async (tx) => {

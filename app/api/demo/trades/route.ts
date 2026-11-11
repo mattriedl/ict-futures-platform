@@ -5,9 +5,10 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { requireUser } from '@/lib/authz';
 import { getOrCreateDemoAccount, evaluateOpenTrades, getDrawdownStatus } from '@/lib/demo-trades';
-import { getInstrumentMeta, getPointValue } from '@/lib/instruments';
+import { getInstrumentMeta } from '@/lib/instruments';
 import { getLeverageForSymbol, computeNotional, computeRequiredMargin } from '@/lib/margin';
 import { fetchLiveQuote } from '@/lib/live-quote';
+import { resolveTradePointValue } from '@/lib/fx';
 
 const createSchema = z.object({
   symbol: z.string().min(1),
@@ -160,6 +161,17 @@ export async function POST(request: NextRequest) {
   // Load user settings once — used for both risk-based sizing and leverage/margin.
   const userSettings = await prisma.userSettings.findUnique({ where: { userId: user.id } });
 
+  // USD value of a 1.00 move per contract, fixed at entry. FX pairs not quoted
+  // in USD are converted with a live rate (lib/fx.ts); everything downstream —
+  // sizing, notional, margin and the trade's P&L — uses this one number.
+  const pointValueUsd = await resolveTradePointValue(data.symbol, data.entryPrice, instrument?.pointValue);
+  if (pointValueUsd == null) {
+    return NextResponse.json(
+      { error: 'Live exchange rate unavailable to value this FX pair in USD right now. Try again shortly.' },
+      { status: 422 },
+    );
+  }
+
   // --- Position sizing -------------------------------------------------------
   // Honor an explicit positionSize (unless autoSize was requested). Otherwise
   // size the position so the trade risks ~riskPercent of the current balance:
@@ -173,8 +185,7 @@ export async function POST(request: NextRequest) {
     positionSize = data.positionSize;
   } else {
     const riskPercent = userSettings?.riskPercent ?? 1;
-    const pointValue = getPointValue(data.symbol, instrument?.pointValue);
-    const perUnitRisk = risk * pointValue; // dollar risk per 1 unit/contract
+    const perUnitRisk = risk * pointValueUsd; // dollar risk per 1 unit/contract
     const riskAmount = account.currentBalance * (riskPercent / 100);
     if (perUnitRisk > 0 && riskAmount > 0) {
       const raw = riskAmount / perUnitRisk;
@@ -191,13 +202,13 @@ export async function POST(request: NextRequest) {
   // the sum of margin reserved by all currently-open trades. A new trade is
   // refused if its required margin exceeds the available balance.
   const leverage = getLeverageForSymbol(data.symbol, userSettings);
-  const notional = computeNotional(data.symbol, data.entryPrice, positionSize, instrument?.pointValue);
+  const notional = computeNotional(data.symbol, data.entryPrice, positionSize, pointValueUsd);
   const requiredMargin = computeRequiredMargin(
     data.symbol,
     data.entryPrice,
     positionSize,
     leverage,
-    instrument?.pointValue,
+    pointValueUsd,
   );
 
   const openMarginAgg = await prisma.demoTrade.aggregate({
@@ -243,6 +254,7 @@ export async function POST(request: NextRequest) {
       stopLoss: data.stopLoss,
       takeProfit: data.takeProfit,
       positionSize,
+      pointValue: pointValueUsd,
       margin: Math.round(requiredMargin * 100) / 100,
       riskReward,
       aiScore: data.aiScore ?? null,

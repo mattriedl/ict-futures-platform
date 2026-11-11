@@ -442,7 +442,10 @@ function ManualTradeModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
   const e = parseFloat(entryPrice), sl = parseFloat(stopLoss), tp = parseFloat(takeProfit);
   const rr = !isNaN(e) && !isNaN(sl) && !isNaN(tp) && Math.abs(e - sl) > 0
     ? Math.round((Math.abs(tp - e) / Math.abs(e - sl)) * 100) / 100 : null;
-  const risk$ = !autoSize && !isNaN(e) && !isNaN(sl) && meta ? Math.abs(e - sl) * meta.pointValue * (parseFloat(positionSize) || 1) : null;
+  // FX pairs not quoted in USD are valued in USD on the server at entry using a
+  // live rate, so a client-side dollar preview would be wrong — show none.
+  const nonUsdFx = /=X$/.test(symbol) && !/USD=X$/.test(symbol);
+  const risk$ = !autoSize && !nonUsdFx && !isNaN(e) && !isNaN(sl) && meta ? Math.abs(e - sl) * meta.pointValue * (parseFloat(positionSize) || 1) : null;
 
   const save = async () => {
     setSaving(true);
@@ -506,7 +509,9 @@ function ManualTradeModal({ onClose, onSaved }: { onClose: () => void; onSaved: 
           <div className="flex items-center gap-4 bg-[#0D1121] border border-white/5 rounded-lg px-4 py-3 text-xs">
             {rr != null && <div><span className="text-gray-500">R:R </span><span className="text-blue-400 font-mono font-semibold">{fmt(rr, 2)}</span></div>}
             {risk$ != null && <div><span className="text-gray-500">Risk </span><span className="text-red-400 font-mono font-semibold">{money(risk$)}</span></div>}
-            <div className="text-gray-600">· point value {money(meta?.pointValue)}</div>
+            <div className="text-gray-600">
+              {nonUsdFx ? '· valued in USD at the live rate when opened' : <>· point value {money(meta?.pointValue)}</>}
+            </div>
           </div>
         )}
 

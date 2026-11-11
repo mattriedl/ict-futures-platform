@@ -59,6 +59,7 @@ Defined in `lib/margin.ts` and applied in `lib/demo-trades.ts`.
   - Forex: **30×** (`leverageForex`)
   - Futures: **10×** (`leverageFutures`)
 - **Risk sizing:** position size is derived from the user's `riskPercent` of account balance against the stop distance.
+- **FX in USD:** an FX contract is one micro lot (1,000 base units), so a 1.00 move is worth 1,000 of the *quote* currency. At entry, `resolveTradePointValue()` (`lib/fx.ts`) converts that to USD with a live rate: quote USD → ×1; base USD (USDJPY) → ×1/price; crosses (EURGBP, GBPJPY) → via the quote currency's USD pair. The result is stored on the trade (`DemoTrade.pointValue`) and used for sizing, margin and P&L for the trade's lifetime. If no live rate is available the trade is refused. Trades opened before Nov 2026 have no stored value and use the instrument's configured one.
 
 ---
 

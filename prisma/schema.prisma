@@ -236,6 +236,7 @@ model DemoTrade {
   stopLoss      Float
   takeProfit    Float
   positionSize  Float      @default(1)
+  pointValue    Float?     // USD value of a 1.00 move per contract, fixed at entry (FX converted to USD); null on older trades
   margin        Float?     // dollar margin reserved while OPEN; null/0 once closed
   pendingApproach String?  // for PENDING auto-trades: 'RISE' | 'FALL' — direction price must move to reach entry
   expiresAt     DateTime?  // for PENDING auto-trades: auto-cancel time if entry never reached

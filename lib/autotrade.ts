@@ -30,7 +30,7 @@ import { fetchMarketData } from '@/lib/market-data';
 import { analyzeICT, scoreConfluence, generateTradeSetup } from '@/lib/ict-engine';
 import { deriveAssetClass, biasToDirection, computeWeightedScore } from '@/lib/setup-stats';
 import { fetchLiveQuote } from '@/lib/live-quote';
-import { getPointValue } from '@/lib/instruments';
+import { resolveTradePointValue } from '@/lib/fx';
 import { getLeverageForSymbol, computeRequiredMargin } from '@/lib/margin';
 import { getOrCreateDemoAccount, getDrawdownStatus } from '@/lib/demo-trades';
 
@@ -113,7 +113,7 @@ export async function activatePendingTrades(
         trade.entryPrice,
         trade.positionSize,
         leverage,
-        (trade as any).instrument?.pointValue,
+        trade.pointValue ?? (trade as any).instrument?.pointValue,
       );
 
       const account = await getOrCreateDemoAccount(trade.userId);
@@ -278,7 +278,13 @@ export async function runAutoTrade(
       const entry = round4(live);
 
       // --- Sizing: 1%-risk rule (same formula as manual trade route) ---------
-      const pointValue = getPointValue(symbol, instrument.pointValue);
+      // USD value per 1.00 move, fixed at entry (FX converted via live rates).
+      const pointValue = await resolveTradePointValue(symbol, entry, instrument.pointValue);
+      if (pointValue == null) {
+        skipped++;
+        diagnostics.push({ symbol, weightedScore: Math.round(score), reason: 'no-fx-rate' });
+        continue;
+      }
       const perUnitRisk = Math.abs(entry - stop) * pointValue;
       if (perUnitRisk <= 0) { skipped++; continue; }
       const riskAmount = account.currentBalance * (riskPercent / 100);
@@ -287,7 +293,7 @@ export async function runAutoTrade(
 
       // --- No-over-bankroll cap ---------------------------------------------
       const leverage = getLeverageForSymbol(symbol, settings);
-      let requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, instrument.pointValue);
+      let requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, pointValue);
       if (requiredMargin > availableBalance) {
         const scale = (availableBalance / requiredMargin) * 0.99;
         // If the bankroll only covers a sliver of the intended risk, skip the
@@ -298,7 +304,7 @@ export async function runAutoTrade(
           continue;
         }
         positionSize = round4(positionSize * scale);
-        requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, instrument.pointValue);
+        requiredMargin = computeRequiredMargin(symbol, entry, positionSize, leverage, pointValue);
       }
       if (positionSize <= 0 || requiredMargin > availableBalance + 1e-6) { skipped++; diagnostics.push({ symbol, weightedScore: Math.round(score), reason: 'insufficient-bankroll' }); continue; }
 
@@ -330,6 +336,7 @@ export async function runAutoTrade(
           stopLoss: stop,
           takeProfit: tp,
           positionSize,
+          pointValue,
           margin: round2(requiredMargin),
           riskReward: setup.riskReward,
           aiScore: score,
