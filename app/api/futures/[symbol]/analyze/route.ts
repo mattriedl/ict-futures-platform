@@ -24,7 +24,7 @@ export async function GET(
     const bars      = await fetchMarketData(symbol, timeframe);
     const unavailable = bars.length === 0;
     const patterns  = analyzeICT(bars);
-    const confluence = scoreConfluence(patterns);
+    const confluence = scoreConfluence(patterns, bars);
     const setup     = generateTradeSetup(bars, patterns);
     const sessionInfo = getSessionInfo();
 
@@ -42,11 +42,8 @@ export async function GET(
       // keep candle-derived fallback
     }
 
-    const bullish = patterns.filter((p: any) => p?.direction === 'BULLISH');
-    const bearish = patterns.filter((p: any) => p?.direction === 'BEARISH');
-    const bias    = bullish.length > bearish.length ? 'BULLISH'
-                  : bearish.length > bullish.length ? 'BEARISH'
-                  : 'NEUTRAL';
+    // Bias from higher-timeframe structure (see lib/ict-engine/ict-score.ts).
+    const bias = confluence.bias;
 
     // Pattern breakdown by type
     const patternBreakdown: Record<string, number> = {};

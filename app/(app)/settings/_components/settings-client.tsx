@@ -163,13 +163,13 @@ export function SettingsClient() {
               min={20}
               max={90}
               step={5}
-              value={settings?.alertMinScore ?? 60}
+              value={settings?.alertMinScore ?? 50}
               onChange={(e) => setSettings((prev: any) => ({ ...(prev ?? {}), alertMinScore: parseInt(e.target.value) }))}
               className="w-full accent-blue-500"
             />
             <div className="flex justify-between text-xs text-gray-500 mt-1">
               <span>20</span>
-              <span className="text-blue-400 font-mono">{settings?.alertMinScore ?? 60}</span>
+              <span className="text-blue-400 font-mono">{settings?.alertMinScore ?? 50}</span>
               <span>90</span>
             </div>
           </div>
@@ -440,7 +440,7 @@ export function SettingsClient() {
             min={0}
             max={100}
             step={1}
-            value={settings?.autoTradeMinScore ?? 75}
+            value={settings?.autoTradeMinScore ?? 70}
             onChange={(e) => {
               const raw = parseFloat(e.target.value);
               setSettings((prev: any) => ({ ...(prev ?? {}), autoTradeMinScore: Number.isNaN(raw) ? 75 : raw }));

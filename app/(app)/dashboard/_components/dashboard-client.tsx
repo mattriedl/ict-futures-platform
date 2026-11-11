@@ -69,7 +69,7 @@ export function DashboardClient() {
   const [currentTime, setCurrentTime] = useState('');
   const [sessionInfo, setSessionInfo] = useState({ session: '', killZone: '' });
   // Minimum AI score threshold — reuses the existing user setting (alertMinScore).
-  const [minScore, setMinScore] = useState(60);
+  const [minScore, setMinScore] = useState(50);
   const [drawdown, setDrawdown] = useState<DrawdownStatus | null>(null);
   const [symbols, setSymbols] = useState<DashSymbol[]>(() => buildSymbols(DEFAULT_TRACKED));
   const [refreshMs, setRefreshMs] = useState(60000);

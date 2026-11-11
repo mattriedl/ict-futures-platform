@@ -91,7 +91,7 @@ export async function runAlertScan(): Promise<AlertScanResult> {
       try {
         const { setup, weightedScore } = await analyse(symbol);
         if (!setup || weightedScore == null) continue;
-        if (weightedScore < (s.alertMinScore ?? 60)) continue;
+        if (weightedScore < (s.alertMinScore ?? 50)) continue;
         if (!setup.confluences.some((c) => enabledPatterns.includes(c))) continue;
 
         const direction = setup.direction; // BULLISH | BEARISH

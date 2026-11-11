@@ -48,7 +48,7 @@ Stored one row per user; edited via the Settings UI (`/api/settings`).
 | `refreshInterval` | `60` | Dashboard/chart auto-refresh seconds. |
 | `theme` | `dark` | UI theme. |
 | `trackedSymbols` | `ES=F,NQ=F,CL=F,GC=F` | Up to 20 symbols shown on the dashboard and scanned for alerts (pick any instrument in Settings). |
-| `alertMinScore` | `60` | Minimum setup score to raise an alert. |
+| `alertMinScore` | `50` | Minimum setup score to raise an alert (ICT score scale; see docs/08 §2a). |
 | `alertOnOB` / `alertOnFVG` / `alertOnLiqSweep` / `alertOnMSS` / `alertOnOTE` | `true` | Per-pattern alert toggles. |
 | `notificationsOn` | `true` | "Generate setup alerts": master switch for alert generation in the scheduled cycle. |
 | `emailAlertsEnabled` | `false` | Also email each new alert (needs Gmail env vars and the admin's global email switch). |
@@ -61,7 +61,7 @@ Stored one row per user; edited via the Settings UI (`/api/settings`).
 | `leverageForex` | `30` | Leverage for FX margin. |
 | `leverageFutures` | `10` | Leverage for futures margin. |
 | `autoTradeEnabled` | `false` | **Master switch for the autotrader for this user.** |
-| `autoTradeMinScore` | `75` | Minimum weighted setup score to auto-place a trade. |
+| `autoTradeMinScore` | `70` | Minimum weighted setup score to auto-place a trade (ICT score scale). |
 
 > **Operational note:** the owner account currently runs `autoTradeEnabled=true`,
 > `autoTradeMinScore=65`, `riskPercent=1`, and leverage crypto 5 / forex 100 /

@@ -10,7 +10,7 @@ The autotrader runs a **cycle** that, on each invocation:
 
 1. **Activates pending trades** — promotes queued/pending AUTO setups to active open trades.
 2. **Evaluates open trades** — checks each OPEN demo trade against current live prices and resolves it to WIN / LOSS / closed when stop-loss or take-profit is hit.
-3. **Runs auto-entry** — for every user with `autoTradeEnabled = true`, scans current setups and, if a setup's confluence score ≥ that user's `autoTradeMinScore` (default 75), opens a new AUTO demo trade sized by the user's `riskPercent` and leverage settings.
+3. **Runs auto-entry** — for every user with `autoTradeEnabled = true`, scans current setups and, if a setup's confluence score ≥ that user's `autoTradeMinScore` (default 70), opens a new AUTO demo trade sized by the user's `riskPercent` and leverage settings.
 
 4. **Generates setup alerts** — `runAlertScan()` in `lib/alerts.ts` (see docs/01 → Alerts) and emails them when enabled.
 

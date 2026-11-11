@@ -31,6 +31,8 @@ export interface SimulatedTrade {
   // Volume-based liquidity APPROXIMATION (historical depth unavailable).
   liquidityParticipationPercent: number | null;
   liquidityRating: 'AMPLE' | 'MODERATE' | 'THIN' | null;
+  /** Scoring factors that were met when the trade was taken. */
+  factorsMet?: string[];
 }
 
 export interface BacktestResult {
@@ -107,7 +109,8 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
     const window = bars.slice(Math.max(0, i + 1 - ANALYSIS_WINDOW_BARS), i + 1);
     const at = bars[i].timestamp;
     const patterns = analyzeICT(window);
-    const score = scoreConfluence(patterns, at).score;
+    const scored = scoreConfluence(patterns, window, at);
+    const score = scored.score;
 
     if (score < minAiScore) {
       i++;
@@ -200,6 +203,7 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
       pnlPercent: round2(pnlPercent),
       liquidityParticipationPercent: liqEst?.participationPercent ?? null,
       liquidityRating: liqEst?.rating ?? null,
+      factorsMet: scored.factors.filter((f) => f.met).map((f) => f.name.startsWith('HTF bias') ? 'HTF premium/discount' : f.name),
     });
 
     // Advance past the trade close + cooldown to avoid overlapping duplicates.

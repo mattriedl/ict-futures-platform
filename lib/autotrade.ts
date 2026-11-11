@@ -155,7 +155,7 @@ export async function runAutoTrade(
     return { created: 0, scanned: 0, skipped: 0, details: [{ note: 'autoTradeEnabled=false' }], diagnostics: [] };
   }
 
-  const minScore = settings.autoTradeMinScore ?? 75;
+  const minScore = settings.autoTradeMinScore ?? 70;
   const riskPercent = settings.riskPercent ?? 1;
   const timeframe = '15m';
 
